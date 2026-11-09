@@ -26,7 +26,7 @@ const RULER = 20;
 
 type Gesture =
   | { kind: 'pan'; sx: number; sy: number; panX: number; panY: number }
-  | { kind: 'move'; sx: number; sy: number; ids: Id[]; origin: Rect[]; started: boolean }
+  | { kind: 'move'; sx: number; sy: number; ids: Id[]; origin: Rect[]; started: boolean; clicked: Id }
   | { kind: 'resize'; sx: number; sy: number; id: Id; handle: Handle; origin: Rect; started: boolean }
   | { kind: 'marquee'; px: number; py: number; base: Id[] };
 
@@ -333,7 +333,7 @@ export default function CanvasView() {
         s.select(ids);
       }
       const els = pg.elements.filter((x) => ids.includes(x.id) && !x.locked);
-      gesture.current = { kind: 'move', sx: e.clientX, sy: e.clientY, ids: els.map((x) => x.id), origin: els.map((x) => ({ x: x.x, y: x.y, w: x.w, h: x.h })), started: false };
+      gesture.current = { kind: 'move', sx: e.clientX, sy: e.clientY, ids: els.map((x) => x.id), origin: els.map((x) => ({ x: x.x, y: x.y, w: x.w, h: x.h })), started: false, clicked: hit.id };
       return;
     }
     if (!additive) s.select([]);
@@ -407,6 +407,8 @@ export default function CanvasView() {
     setMarquee(null);
     setPanning(false);
     if (g && (g.kind === 'move' || g.kind === 'resize') && g.started) editor().endGesture();
+    // a plain click on one element of a multi-selection selects just that element
+    else if (g?.kind === 'move' && editor().selection.length > 1) editor().select([g.clicked]);
   };
 
   const onDrop = async (e: ReactDragEvent<HTMLDivElement>) => {

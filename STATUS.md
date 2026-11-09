@@ -91,7 +91,6 @@ template gallery with no `console.error`.
   icons, templates and the game mock were checked visually as headless PNGs (`npm run preview:skins`); the UI was
   checked by the jsdom smoke test, the build and the generated CSS. Please eyeball http://localhost:3737 once.
 - Button hover/pressed design preview (optional in the brief) is not implemented.
-- Clicking (without dragging) one element of a multi-selection keeps the multi-selection.
 - Segmented controls have no arrow-key navigation (Tab/Enter work). No snapping to other elements/guides.
 - Undo history is not persisted across reloads. Unused image assets stay in the project until 「清除未使用」.
 - localStorage (~5 MB) limits embedded images; export JSON for backups.
