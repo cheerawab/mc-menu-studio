@@ -134,7 +134,7 @@ export function autotestFiles(ns: string, mode: ExportMode, keys: string[], trig
     if (t.daytimeCheck) {
       const later = `@a[scores={${obj}=${t.tick + AUTOTEST.checkDelay}}]`;
       const range = `${AUTOTEST.dayRange[0]}..${AUTOTEST.dayRange[1]}`;
-      tick.push(`execute as ${later} store result score #daytime ${obj} run time query daytime`);
+      tick.push(`execute as ${later} store result score #daytime ${obj} run time query minecraft:day`);
       tick.push(`execute as ${later} if score #daytime ${obj} matches ${range} run say TRIGGER CHECK ${t.label} OK`);
       tick.push(`execute as ${later} unless score #daytime ${obj} matches ${range} run say TRIGGER CHECK ${t.label} FAIL`);
     }

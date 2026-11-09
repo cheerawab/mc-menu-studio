@@ -92,7 +92,7 @@ export const AUTOTEST = {
   ticksPerPage: 800,
   /** Trigger mode: ticks after the last page's tick at which the three trigger tests run (time, weather, nav/close). */
   triggerOffsets: [40, 120, 200],
-  /** The `time set day` test reads `time query daytime` this many ticks after the trigger... */
+  /** The `time set day` test reads `time query minecraft:day` this many ticks after the trigger... */
   checkDelay: 20,
   /** ...and expects it in this range (1000 = day, plus the ticks that passed if the daylight cycle runs). */
   dayRange: [1000, 1100],

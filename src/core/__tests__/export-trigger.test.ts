@@ -217,7 +217,7 @@ describe('auto-test trigger checks', () => {
       'execute as @a[scores={mcms_t=960}] run time set midnight',
       'execute as @a[scores={mcms_t=960}] run say TRIGGER time_day id 3',
       'execute as @a[scores={mcms_t=960}] run trigger mcms_demo set 3',
-      'execute as @a[scores={mcms_t=980}] store result score #daytime mcms_t run time query daytime',
+      'execute as @a[scores={mcms_t=980}] store result score #daytime mcms_t run time query minecraft:day',
       'execute as @a[scores={mcms_t=980}] if score #daytime mcms_t matches 1000..1100 run say TRIGGER CHECK time_day OK',
       'execute as @a[scores={mcms_t=980}] unless score #daytime mcms_t matches 1000..1100 run say TRIGGER CHECK time_day FAIL',
       'execute as @a[scores={mcms_t=1120}] run say TRIGGER close id 7',

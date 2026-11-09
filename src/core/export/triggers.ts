@@ -129,7 +129,7 @@ export interface AutotestTrigger {
   id: number;
   command: string;
   tick: number;
-  /** `time set day`: the auto-test sets midnight first and checks `time query daytime` a second later. */
+  /** `time set day`: the auto-test sets midnight first and checks `time query minecraft:day` a second later. */
   daytimeCheck: boolean;
 }
 

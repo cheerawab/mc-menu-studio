@@ -61,7 +61,7 @@ does not work for normal players; `/trigger` needs no permission.
 the last page) `say TRIGGER <label> id <N>` then `trigger <obj> set <N>` as the player, for the `time set day` id, the
 `weather clear` id, and the navigation id that opens `lobby` (functions) / the close id (registry). Because tick
 functions run silently, the time test sets midnight first and logs `TRIGGER CHECK time_day OK|FAIL` 20 ticks later
-(`time query daytime` in 1000..1100). `say AUTOTEST DONE` stays at 120 + 800·pages. Expected log lines: HANDOFF.md.
+(`time query minecraft:day` in 1000..1100). `say AUTOTEST DONE` stays at 120 + 800·pages. Expected log lines: HANDOFF.md.
 
 **Export dialog**: new section 「指令執行方式」 with two cards (「/trigger（建議）」 / 「直接執行」), the line
 「這個專案有 N 個指令動作」 (+ number of ids after the build), 尚待實機驗證 marker; the checks list now shows the
@@ -156,3 +156,10 @@ All exporter numbers are in `src/core/export/constants.ts`; mock metrics in `GAM
 - An "open menu" trigger id (functions mode), so normal players can open the menu with `/trigger`?
 - Bundle an OFL font (e.g. Noto Sans TC) so browser and Node exports are identical? G-key target page selectable?
   `pause_screen_additions` option? Move the browser build into a Web Worker?
+
+## Correction after the first real-game autotest run (Hermes, 26.3)
+- `time query daytime` does not exist in 26.3 (world clocks/timelines): the autotest tick function failed to load
+  ("element 'minecraft:daytime' of type 'minecraft:timeline' not found"), so no PAGE/TRIGGER marker ran. The check now uses
+  `time query minecraft:day` (ticks inside the 24000-tick day timeline; `time set day` = marker `minecraft:day` = tick 1000).
+  `time set day|noon|night|midnight` themselves parse in 26.3 (markers). Lesson: parse every generated command with the target
+  game version; unparsable lines make the whole function (and for `trigger_tick` every button) fail.
