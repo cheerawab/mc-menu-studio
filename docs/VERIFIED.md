@@ -128,3 +128,24 @@ and in the world's `datapacks/`), opened the world, autotest showed every page. 
 commands are clumsy and do not work for normal players; (c) the plugin-free solution is a **trigger objective** (`/trigger <obj> set N`
 is permission level 0): buttons run `trigger`, a tick function dispatches N -> the real command as the player (function permission
 level), re-enables the objective every tick. This is the planned "trigger mode".
+
+## 14. STAGE C RESULTS (Hermes, real 26.3 client, singleplayer, functions mode + trigger mode, autotest)
+- VERIFIED server side: autotest `TRIGGER time_day id 9` (= `trigger mcms_mcms_demo set 9` run as the player) followed 1 s later by
+  `TRIGGER CHECK time_day OK`: the chain trigger objective -> `trigger_tick` (as @a at @s, function permission) -> `time set day`
+  works in 26.3; `trigger_load`/`trigger_tick` tag entries written as `{"id":..., "required":false}` load fine.
+- VERIFIED: `TRIGGER nav_lobby id 2` (= `function mcms_demo:show_lobby` dispatched by trigger_tick) replaced the open `notice` dialog by
+  `lobby` (window screenshot diff vs the lobby preview 3.87, same as the direct lobby shot). So page navigation by trigger works.
+- VERIFIED: all 9 pages again pixel-correct with the Stage C export (mean abs diff vs source 3.9-14.9, wrong page 126); the corner
+  squares of the calibration page have the exact colours at the exact corners; frame width 470 px = 256 GUI px * 1.8363.
+- BUG FOUND BY THE RUN (fixed, commit 05131c1): the autotest used `time query daytime`, which does not exist in 26.3 (timelines/world
+  clocks): "Whilst parsing command on line 23 ... 'minecraft:daytime' of type 'minecraft:timeline' not found" made the whole
+  `mcms_autotest:tick` function fail (no PAGE markers at all). Now `time query minecraft:day`. Always check `latest.log` ~15 s after
+  launch for `Failed to load function`.
+- VERIFIED (offline, Mojang's own codec, no game): `Dialog.DIRECT_CODEC` parses all 9 registry-mode dialog JSONs of the Stage C export
+  (`DialogCheck.java` in the minecraft-jar-inspection skill; negative control with a bogus after_action / width 5000 / unknown click
+  action fails as expected).
+- DECOMPILED: `/trigger` has no `requires` in `TriggerCommand.register`, so the client's permission-less parse accepts
+  `trigger <obj> set N` and `verifyCommand` returns NO_ISSUES (no confirm screen). Not seen by clicking.
+- STILL NOT TESTED (needs the user's approval for computer_use input, or a person at the keyboard): real mouse clicks (hit boxes,
+  `after_action: close` after a click, footer button, Esc), hover tooltips, no-confirm-screen for `/trigger` clicks, G key,
+  registry mode in singleplayer (needs a click on the experimental-settings screen) and on a server, other GUI scales/window sizes.
