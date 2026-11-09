@@ -92,3 +92,39 @@ moves the pose, hit-test follows.
 `advance = (int)(0.5 + actualWidth) + 1 = actualWidth + 1`. `ascent <= height` (error otherwise). The `chars` grid must be
 rectangular; pad with `\u0000`; cell = png size / grid. `getActualGlyphWidth` scans columns right to left for any pixel with
 non-zero alpha (luminance-or-alpha != 0). Declaring a codepoint twice only logs a warning (last wins).
+
+## 12. STAGE B EXPORT, REAL CLIENT RESULTS (Hermes, 26.3, singleplayer, GUI scale 3) — functions mode
+Installed `exports/demo/functions/{resourcepack.zip,datapack.zip,autotest.zip}` exactly as a user would (zips in `resourcepacks/`
+and in the world's `datapacks/`), opened the world, autotest showed every page. Load log: no WARN/ERROR from the packs.
+- VERIFIED: all 9 pages render correctly (calibration, lobby, lobby_rules, rules, rules_welcome, shop, quick, settings, notice): no wrap,
+  no garbled rows, tile seams invisible, corner squares at the exact corners, grid lines continuous. Picture is centred; its top is
+  67 MC px below the window content top, identical for pages 160..214 px tall.
+- VERIFIED: `shadow_color: 0` works: the right/bottom edge of the white frame has the same profile as the left/top edge (no 25%-grey
+  band that the spike showed without it).
+- VERIFIED: `dialog show @s {SNBT}` with ~1-2 KB of private-use text per page is accepted; the unzipped zip data packs are picked up
+  from `datapacks/` without `pack.mcmeta` complaints (min_format = max_format = 121).
+- Numeric check (window screenshot rescaled by 1.8363, mean abs diff over opaque pixels vs source bitmap, minimum at the expected
+  position, +1 screenshot px shift raises it by 3-6 levels): shop 5.4, settings 4.9, notice 6.8, rules_welcome 7.5, rules 9.2, quick 12.6
+  (sharp glow lines); a wrong page gives 128.
+- NOT TESTED (no input possible while the user sleeps; computer_use clicks/keys need approval): clicks, hover tooltips, footer button,
+  Esc, G key, registry mode (needs one click on the experimental-settings screen), servers.
+
+## 13. DECOMPILED (26.3 client): what a click really does
+`AbstractStringWidget.mouseClicked` -> `ClickableStyleFinder(font, (int) mouseX, (int) mouseY)` over `visitLines` -> winner style ->
+`DialogBodyHandlers.runActionOnParent` -> `DialogScreen.runAction(event)` which applies the dialog's `after_action`:
+- `none`: the screen stays (`setScreen(this)`). The footer button of a `notice` dialog then does NOTHING (it only runs its own
+  optional action and stays); Esc still closes (`onClose` always uses CLOSE if `can_close_with_escape`).
+- `close` (exporter default): after ANY body click (command, copy, url) the dialog closes (screen := previousScreen, normally null).
+  `show_dialog` opens the next dialog with the same previousScreen, so navigation works with either setting.
+- `wait_for_response`: shows a waiting screen until the server answers (plugin `custom` actions).
+- `run_command` goes through `ClientPacketListener.sendUnattendedCommand` which first runs `verifyCommand`:
+  parse error -> confirm screen; signable arguments (say, msg...) -> "can only be run from chat" confirm; **command that needs
+  elevated permissions (it does not parse with the permission-less suggestion provider: time, weather, gamemode, give, function, dialog,
+  execute...) -> confirm screen "multiplayer.confirm_command.permissions_required" ("This command requires elevated permissions.
+  This might negatively affect your game. Are you sure? Command: ...", button "Run Command") EVERY time, even for ops / cheats-on
+  singleplayer.** Only commands that parse without permissions (e.g. `/trigger`, `/list`, `/help`) run silently.
+  `show_dialog`, `copy_to_clipboard` do not confirm; `open_url` shows the link confirm screen if the chat-link prompt option is on.
+=> consequences: (a) functions-mode navigation `function ns:show_x` always shows the confirm screen; (b) menus that run privileged
+commands are clumsy and do not work for normal players; (c) the plugin-free solution is a **trigger objective** (`/trigger <obj> set N`
+is permission level 0): buttons run `trigger`, a tick function dispatches N -> the real command as the player (function permission
+level), re-enables the objective every tick. This is the planned "trigger mode".
