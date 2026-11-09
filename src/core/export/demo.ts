@@ -5,17 +5,19 @@ import type { RenderEnv } from '../render/types';
 import { TEMPLATES } from '../templates';
 import { CALIBRATION_KEY, calibrationPage } from './calibration';
 import { exportPagesFromProject } from './project';
-import type { ExportOptions, ExportPage } from './types';
+import type { CommandMode, ExportOptions, ExportPage } from './types';
 
 export const DEMO_NAMESPACE = 'mcms_demo';
 
-export const demoOptions = (mode: ExportOptions['mode'], autotest = false): ExportOptions => ({
+/** `commandMode` omitted = direct (the Stage B output the golden tests pin); the CLI passes its --commands value. */
+export const demoOptions = (mode: ExportOptions['mode'], autotest = false, commandMode?: CommandMode): ExportOptions => ({
   namespace: DEMO_NAMESPACE,
   packName: 'MC Menu Studio 示範',
   mode,
   quickActions: true,
   afterAction: 'close',
   autotest,
+  ...(commandMode ? { commandMode } : {}),
 });
 
 /**

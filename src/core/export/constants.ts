@@ -71,8 +71,18 @@ export const DIALOG_PAUSE = false;
 
 /** WIKI: `run_command` does not need a leading slash (the spike used none). */
 export const COMMAND_PREFIX = '';
-/** TEST: the "close menu" action runs this command (needs permission level 2). */
+/** The "close menu" action runs this command (needs permission level 2; in trigger mode the tick function runs it). */
 export const CLOSE_COMMAND = 'dialog clear @s';
+
+/**
+ * DECOMPILED §13: trigger mode. Buttons run `trigger mcms_<ns> set <id>` (permission level 0, no confirm screen);
+ * `data/<ns>/function/trigger_tick.mcfunction` (tag minecraft:tick) runs the real command as the player.
+ * TEST: the whole chain (click -> trigger -> dispatch) has not run in the game yet.
+ */
+export const TRIGGER_OBJECTIVE_PREFIX = 'mcms_';
+export const TRIGGER_FUNCTIONS = { load: 'trigger_load', tick: 'trigger_tick' } as const;
+/** WIKI/TEST: chat input is limited to 256 characters; longer commands get a warning (function lines have no such limit). */
+export const MAX_TRIGGER_COMMAND_WARN = 256;
 
 /** VERIFIED §5: auto-test data pack used by Hermes (page k shown at tick firstTick + ticksPerPage * k). */
 export const AUTOTEST = {
@@ -80,6 +90,12 @@ export const AUTOTEST = {
   objective: 'mcms_t',
   firstTick: 120,
   ticksPerPage: 800,
+  /** Trigger mode: ticks after the last page's tick at which the three trigger tests run (time, weather, nav/close). */
+  triggerOffsets: [40, 120, 200],
+  /** The `time set day` test reads `time query daytime` this many ticks after the trigger... */
+  checkDelay: 20,
+  /** ...and expects it in this range (1000 = day, plus the ticks that passed if the daylight cycle runs). */
+  dayRange: [1000, 1100],
 } as const;
 
 /** Determinism: every zip entry gets this timestamp; deflate levels are fixed. */

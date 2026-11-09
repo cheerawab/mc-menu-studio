@@ -3,8 +3,9 @@
 import { CircleCheck, CircleExclamationPoint, Download, FileArchive, Info, LoaderCircle, Server, TriangleExclamationPoint, User } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { fitProblem, WINDOW_PRESETS } from '@/core/game/chrome';
-import { buildExport, zipBundle, zipExport, type ExportArchives, type ExportBuild, type ExportMode, type ExportOptions, type AfterAction } from '@/core/export';
-import { checkExport, exportPagesFromProject } from '@/core/export/project';
+import { buildExport, zipBundle, zipExport, type AfterAction, type CommandMode, type ExportArchives, type ExportBuild, type ExportMode, type ExportOptions } from '@/core/export';
+import { checkExport, countCommandActions, exportPagesFromProject } from '@/core/export/project';
+import { triggerObjective } from '@/core/export/triggers';
 import { openCommand } from '@/core/export/readme';
 import { effectiveFooterLabel } from '@/core/model/defaults';
 import { countIssues, type Issue } from '@/core/model/validate';
@@ -18,9 +19,10 @@ interface Prefs {
   mode: ExportMode;
   quickActions: boolean;
   afterAction: AfterAction;
+  commandMode: CommandMode;
 }
 const PREFS_KEY = 'mc-menu-studio:export:v1';
-const DEFAULT_PREFS: Prefs = { mode: 'registry', quickActions: true, afterAction: 'close' };
+const DEFAULT_PREFS: Prefs = { mode: 'registry', quickActions: true, afterAction: 'close', commandMode: 'trigger' };
 
 function loadPrefs(): Prefs {
   try {
@@ -29,6 +31,7 @@ function loadPrefs(): Prefs {
       mode: raw.mode === 'functions' ? 'functions' : 'registry',
       quickActions: raw.quickActions !== false,
       afterAction: raw.afterAction === 'none' ? 'none' : 'close',
+      commandMode: raw.commandMode === 'direct' ? 'direct' : 'trigger',
     };
   } catch {
     return DEFAULT_PREFS;
@@ -143,12 +146,15 @@ function ExportBody() {
 
   const issues = useMemo(() => {
     const win = WINDOW_PRESETS.find((w) => w.id === windowId) ?? WINDOW_PRESETS[1];
-    return checkExport(project, { fitCheck: (page) => fitProblem(win, guiScale, page) });
-  }, [project, guiScale, windowId]);
+    return checkExport(project, { fitCheck: (page) => fitProblem(win, guiScale, page), mode: prefs.mode, commandMode: prefs.commandMode });
+  }, [project, guiScale, windowId, prefs.mode, prefs.commandMode]);
   const counts = countIssues(issues);
   const blocked = counts.error > 0;
   const options = useMemo<ExportOptions>(
-    () => ({ namespace: project.namespace, packName: project.name, mode: prefs.mode, quickActions: prefs.quickActions, afterAction: prefs.afterAction }),
+    () => ({
+      namespace: project.namespace, packName: project.name, mode: prefs.mode, quickActions: prefs.quickActions,
+      afterAction: prefs.afterAction, commandMode: prefs.commandMode,
+    }),
     [project.namespace, project.name, prefs],
   );
 
@@ -180,8 +186,13 @@ function ExportBody() {
   const first = project.pages[0];
   const firstCmd = first ? openCommand(ns, first.key, prefs.mode) : '';
   const reg = prefs.mode === 'registry';
+  const trigger = prefs.commandMode === 'trigger';
+  const objective = triggerObjective(ns);
+  const commandCount = countCommandActions(project, prefs.mode);
   const footer = first ? effectiveFooterLabel(first, project) : '關閉';
   const shown = issues.filter((i) => i.severity !== 'info').slice(0, 6);
+  // export-only notes (command mode, close action) are not in the editor's 檢查 tab, so list them here
+  const exportNotes = issues.filter((i) => i.severity === 'info' && i.code.startsWith('export-'));
   const names = ready?.build.names ?? { resourcePack: `${ns}_resourcepack.zip`, dataPack: `${ns}_datapack.zip` };
 
   const single: ReactNode[] = [
@@ -190,7 +201,7 @@ function ExportBody() {
     reg ? (
       <>開啟世界時 Minecraft 會顯示「使用實驗性設定的世界不受支援」畫面（資料包新增了對話框就會出現，每次開啟都會出現），選「我知道我在做什麼！」即可進入。</>
     ) : (
-      <>這個模式不會出現實驗性設定警告，但世界需要開啟作弊（建立世界時開啟「允許作弊」，或用「對區域網路開放」暫時開啟）。</>
+      <>這個模式不會出現實驗性設定警告，但世界需要開啟作弊（建立世界時開啟「允許作弊」，或用「對區域網路開放」暫時開啟），因為開啟選單要用 <Cmd>/function</Cmd>。</>
     ),
     reg ? (
       <>{prefs.quickActions ? '按 G 鍵（快捷動作）開啟選單，或' : ''}在聊天欄輸入 <Cmd>{firstCmd}</Cmd>（輸入指令需要開啟作弊）。</>
@@ -204,7 +215,11 @@ function ExportBody() {
     reg ? (
       <>伺服器不會出現實驗性設定畫面。{prefs.quickActions ? '玩家可以按 G 鍵開啟選單；' : ''}管理員、指令方塊或 NPC 外掛也可以執行 <Cmd>/dialog show &lt;玩家&gt; {ns}:{first?.key}</Cmd>。頁面切換一般玩家也能使用。</>
     ) : (
-      <>開啟與切換頁面都要 <Cmd>/function</Cmd> 權限（OP），一般玩家無法使用。伺服器請改用「資料包對話框」模式。</>
+      trigger ? (
+        <>開啟選單要 <Cmd>/function</Cmd> 權限（OP），或由指令方塊、NPC 外掛替玩家執行；選單裡的按鈕與切換頁面透過 <Cmd>/trigger</Cmd>，一般玩家也能使用。伺服器仍建議用「資料包對話框」模式（可綁定 G 鍵）。</>
+      ) : (
+        <>開啟與切換頁面都要 <Cmd>/function</Cmd> 權限（OP），一般玩家無法使用。伺服器請改用「資料包對話框」模式，或把指令執行方式改成 /trigger。</>
+      )
     ),
   ];
 
@@ -228,7 +243,7 @@ function ExportBody() {
                 頁面登錄在資料包裡，按鈕用 show_dialog 切換頁面，一般玩家也能使用，還能綁定 G 鍵。單人遊戲每次開啟世界時，Minecraft 會先跳出「實驗性設定」警告畫面（選「我知道我在做什麼！」即可）；伺服器不會出現。
               </ModeCard>
               <ModeCard active={!reg} onClick={() => setPrefs({ mode: 'functions' })} title="函數內嵌" tag="單人／地圖" code="functions">
-                每個頁面變成一個函數，用 /dialog show 直接顯示，所以單人遊戲不會出現實驗性設定警告。但開啟選單和切換頁面都要用 /function：單人需開啟作弊、伺服器需 OP 權限，一般玩家無法使用，也不能綁定 G 鍵。
+                每個頁面變成一個函數，用 /dialog show 直接顯示，所以單人遊戲不會出現實驗性設定警告。但開啟選單要用 /function（單人需開啟作弊、伺服器需 OP 權限），也不能綁定 G 鍵；切換頁面在 /trigger 模式下一般玩家也能使用，直接執行時同樣需要權限。
               </ModeCard>
             </div>
             <div className="mt-3 flex flex-col gap-2.5">
@@ -237,18 +252,41 @@ function ExportBody() {
               ) : (
                 <p className="text-[11.5px] text-fg-dim">函數內嵌模式無法綁定 G 鍵。</p>
               )}
-              <Field label={`按下對話框底部的「${footer}」按鈕後`} hint="尚待實機驗證。按鈕文字可在頁面設定中修改。">
+              <Field
+                label="點擊選單後"
+                hint={
+                  prefs.afterAction === 'close'
+                    ? `點選單裡的任何按鈕（執行指令、複製文字、開啟網址）或底部的「${footer}」按鈕後，選單都會關閉；切換頁面會直接開啟下一頁。點擊尚待實機驗證。`
+                    : `點按鈕後選單保持開啟，可以連續操作；底部的「${footer}」按鈕會關閉選單（Esc 也可以）。點擊尚待實機驗證。`
+                }
+              >
                 <Select<AfterAction>
-                  ariaLabel="底部按鈕的動作"
+                  ariaLabel="點擊選單後"
                   value={prefs.afterAction}
                   onChange={(v) => setPrefs({ afterAction: v })}
                   options={[
-                    { value: 'close', label: '關閉選單（建議）' },
-                    { value: 'none', label: '不動作，選單保持開啟（用 Esc 關閉）' },
+                    { value: 'close', label: '點擊後關閉（建議）' },
+                    { value: 'none', label: '保持開啟' },
                   ]}
                 />
               </Field>
             </div>
+          </Section>
+          <Section title="指令執行方式">
+            <div role="radiogroup" aria-label="指令執行方式" className="flex flex-col gap-2">
+              <ModeCard active={trigger} onClick={() => setPrefs({ commandMode: 'trigger' })} title="/trigger（建議）" tag="一般玩家可用" code="trigger">
+                一般玩家也能按按鈕，不會出現 Minecraft 的確認畫面。按鈕只送出 /trigger，資料包裡的函數再以函數權限執行真正的指令，所以任何玩家也能自己輸入 /trigger {objective} set &lt;編號&gt; 執行選單裡的動作。資料包會多兩個函數：trigger_load（載入時建立計分板）與 trigger_tick（每個 tick 執行）。
+              </ModeCard>
+              <ModeCard active={!trigger} onClick={() => setPrefs({ commandMode: 'direct' })} title="直接執行" tag="需要權限" code="direct">
+                按鈕直接送出指令本身，玩家需要對應的權限。需要權限的指令（time、weather、gamemode、give、function、dialog…）每次點擊都會跳出 Minecraft 的「確認指令執行」畫面，一般玩家無法使用。
+              </ModeCard>
+            </div>
+            <p className="mt-2.5 text-[11.5px] leading-relaxed text-fg-dim">
+              這個專案有 <span className="font-semibold text-fg">{commandCount}</span> 個指令動作（執行指令、關閉選單{reg ? '' : '、切換頁面'}）
+              {trigger && ready?.build.triggers ? `，匯出後共 ${ready.build.triggers.actions.length} 個編號（同樣的動作共用一個編號，對照表在 README_zh-TW.txt）` : ''}。
+              {trigger && '函數執行的指令不會把回饋訊息（例如 /random value 的結果）顯示給玩家，需要顯示文字時請用 /tellraw @s。'}
+              按鈕點擊<span className="text-warn">尚待實機驗證</span>。
+            </p>
           </Section>
         </div>
 
@@ -267,10 +305,17 @@ function ExportBody() {
             {shown.length > 0 ? (
               <ul className="flex flex-col gap-1">
                 {shown.map((i, k) => <IssueRow key={`${i.code}-${k}`} issue={i} />)}
-                {issues.length - shown.length > 0 && <li className="text-[11.5px] text-fg-dim">另有 {issues.length - shown.length} 項（提示與其他項目請看「檢查」分頁）。</li>}
+                {issues.length - shown.length - exportNotes.length > 0 && (
+                  <li className="text-[11.5px] text-fg-dim">另有 {issues.length - shown.length - exportNotes.length} 項（提示與其他項目請看「檢查」分頁）。</li>
+                )}
               </ul>
             ) : (
               <p className="flex items-center gap-1.5 text-[12px] text-fg-muted"><CircleCheck size={13} className="text-accent" /> 沒有錯誤或警告。</p>
+            )}
+            {exportNotes.length > 0 && (
+              <ul className="mt-2 flex flex-col gap-1">
+                {exportNotes.map((i, k) => <IssueRow key={`${i.code}-${k}`} issue={i} />)}
+              </ul>
             )}
             {ready && ready.build.warnings.length > 0 && (
               <ul className="mt-2 flex flex-col gap-1">
@@ -336,8 +381,12 @@ function ExportBody() {
           <Section title="注意事項">
             <ul className="flex list-disc flex-col gap-1 pl-4 text-[11.5px] leading-relaxed text-fg-dim">
               <li>選單是一張靜態圖片：沒有滑鼠移上去的變化、沒有動畫，也不能輸入文字。</li>
-              <li>已在 Minecraft 26.3 實機確認：圖片的位置與拼接。<span className="text-warn">尚待實機驗證</span>：按鈕點擊、滑鼠提示文字、頁面切換、底部按鈕與「關閉選單」動作的實際行為。</li>
-              <li>「執行指令」以玩家身分執行；「關閉選單」動作使用 <Cmd>/dialog clear @s</Cmd>，都需要對應的指令權限。</li>
+              <li>已在 Minecraft 26.3 實機確認：圖片的位置與拼接。<span className="text-warn">尚待實機驗證</span>：按鈕點擊、滑鼠提示文字、頁面切換、底部按鈕與 /trigger 的實際執行。</li>
+              {trigger ? (
+                <li>「執行指令」與「關閉選單」（<Cmd>/dialog clear @s</Cmd>）透過 <Cmd>/trigger {objective} set &lt;編號&gt;</Cmd> 執行，一般玩家也能使用；所有指令寫在同一個函數檔 trigger_tick 裡，只要一個指令打錯，整個函數就不會載入，所有按鈕都會失效，請先在遊戲裡試過每個指令。</li>
+              ) : (
+                <li>「執行指令」以玩家身分直接送出；「關閉選單」使用 <Cmd>/dialog clear @s</Cmd>。需要權限的指令每次點擊都會跳出「確認指令執行」畫面，一般玩家無法使用。</li>
+              )}
               <li>圖片裡的文字是用你電腦上的字型畫出來的。請確認你有權以這種方式使用並散布該字型；開源字型（例如 Noto Sans TC）最安全。</li>
             </ul>
           </Section>

@@ -3,19 +3,19 @@
 import { DEFAULT_FOOTER_LABEL } from '../model/defaults';
 import { KEY_RE } from '../model/ids';
 import { DEFAULT_TILE_SIZE, glyphAdvance, MAX_PICTURE_WIDTH, MAX_VERIFIED_OFFSET } from './constants';
-import { clickEvent, dialogObject, hoverEvent, oneLine, textComponents } from './dialogs';
+import { clickEvent, dialogObject, footerCommand, hoverEvent, oneLine, textComponents } from './dialogs';
+import { ExportError } from './errors';
 import { composePage, splitRegion, type Box, type HitPlacement, type PageLayout, type Placement } from './layout';
-import { autotestFiles, dataPackFiles, resourcePackFiles, utf8, zipFiles, type FontPlan } from './pack';
+import { autotestFiles, autotestTick, dataPackFiles, resourcePackFiles, utf8, zipFiles, type FontPlan } from './pack';
 import { MODE_LABELS, readmeText } from './readme';
 import { CodepointAllocator, hitSheet, packSheets, type Sheet } from './sheets';
 import { TileSet, type PlacedTile } from './tiles';
-import type { ExportOptions, ExportPage, ExportRegion, ExportStats, ExportWarning, FileMap } from './types';
+import { assignTriggers, autotestTriggers, checkTriggerCommands, triggerLookup } from './triggers';
+import type { ExportOptions, ExportPage, ExportRegion, ExportStats, ExportWarning, FileMap, TriggerTable } from './types';
 
 export type * from './types';
-export { MODE_LABELS } from './readme';
-
-/** Input that cannot be exported (the UI blocks on validation before this can happen). Message is zh-TW. */
-export class ExportError extends Error {}
+export { COMMAND_MODE_LABELS, MODE_LABELS } from './readme';
+export { ExportError };
 
 export type ResolvedOptions = Required<ExportOptions>;
 
@@ -52,6 +52,8 @@ export interface ExportBuild {
   resourcePack: FileMap;
   dataPack: FileMap;
   autotest: FileMap | null;
+  /** Trigger mode: the objective and the id table ("按鈕編號對照"); null in direct mode. */
+  triggers: TriggerTable | null;
   readme: string;
   stats: ExportStats;
   warnings: ExportWarning[];
@@ -64,6 +66,7 @@ export function resolveOptions(o: ExportOptions): ResolvedOptions {
     mode: o.mode,
     quickActions: o.mode === 'registry' && o.quickActions,
     afterAction: o.afterAction,
+    commandMode: o.commandMode ?? 'direct',
     tileSize: o.tileSize ?? DEFAULT_TILE_SIZE,
     autotest: o.autotest ?? false,
   };
@@ -149,6 +152,14 @@ export function buildExport(input: ExportPage[], options: ExportOptions, names?:
     return { page, placed, regions, hits };
   });
 
+  // 1b) trigger mode: ids in order of first appearance (pages, regions in z-order), then the footer close (after_action none)
+  const triggers =
+    o.commandMode === 'trigger'
+      ? assignTriggers(prepared.map((p) => ({ key: p.page.key, regions: p.regions })), ns, o.mode, o.afterAction === 'none')
+      : null;
+  const ids = triggers ? triggerLookup(triggers, ns, o.mode) : null;
+  if (triggers) warnings.push(...checkTriggerCommands(triggers));
+
   // 2) code points: tile glyphs in first-appearance order, then one glyph per distinct hit size
   const alloc = new CodepointAllocator();
   const tileCp = tileSet.tiles.map(() => alloc.take());
@@ -195,9 +206,11 @@ export function buildExport(input: ExportPage[], options: ExportOptions, names?:
       return { x: box.x, y: box.y, cp: hitSizes.get(k)!.cp, advance: glyphAdvance(box.w), region };
     });
     const layout = composePage(W, H, tiles, hitGlyphs);
-    const contents = textComponents(layout, regions, ns, o.mode);
+    const contents = textComponents(layout, regions, ns, o.mode, ids);
     const footerLabel = oneLine(page.footerLabel) || DEFAULT_FOOTER_LABEL;
-    const dialog = dialogObject({ title: page.title, footerLabel, layout, contents, afterAction: o.afterAction });
+    const dialog = dialogObject({
+      title: page.title, footerLabel, layout, contents, afterAction: o.afterAction, footerCommand: footerCommand(o.afterAction, ids),
+    });
     const maxOffset = layout.offsets.length ? layout.offsets[layout.offsets.length - 1] : 0;
     if (maxOffset > MAX_VERIFIED_OFFSET)
       warnings.push({
@@ -219,8 +232,11 @@ export function buildExport(input: ExportPage[], options: ExportOptions, names?:
   // 6) files
   const packName = o.packName;
   const resourcePack = resourcePackFiles(ns, `${packName}（選單工坊・圖片）`, sheets, fonts);
-  const dataPack = dataPackFiles(ns, `${packName}（選單工坊・${MODE_LABELS[o.mode]}）`, o.mode, pages, o.quickActions);
-  const autotest = o.autotest ? autotestFiles(ns, o.mode, pages.map((p) => p.key)) : null;
+  const dataPack = dataPackFiles(ns, `${packName}（選單工坊・${MODE_LABELS[o.mode]}）`, o.mode, pages, o.quickActions, triggers);
+  const keys = pages.map((p) => p.key);
+  const autotest = o.autotest
+    ? autotestFiles(ns, o.mode, keys, triggers && { objective: triggers.objective, tests: autotestTriggers(triggers, o.mode, autotestTick(keys.length - 1)) })
+    : null;
   const allRegions = pages.flatMap((p) => p.regions);
   const readme = readmeText({
     packName,
@@ -228,6 +244,8 @@ export function buildExport(input: ExportPage[], options: ExportOptions, names?:
     mode: o.mode,
     quickActions: o.quickActions,
     afterAction: o.afterAction,
+    commandMode: o.commandMode,
+    triggers,
     pages: pages.map((p) => ({ key: p.key, title: p.title, footerLabel: p.footerLabel })),
     files: { resourcePack: fileNames.resourcePack, dataPack: fileNames.dataPack },
     hasCommands: allRegions.some((r) => r.action.type === 'command'),
@@ -250,7 +268,7 @@ export function buildExport(input: ExportPage[], options: ExportOptions, names?:
     maxOffset: fonts.length ? fonts[fonts.length - 1].offset : 0,
     components: sum((p) => p.components),
   };
-  return { options: o, names: fileNames, pages, sheets, fonts, resourcePack, dataPack, autotest, readme, stats, warnings };
+  return { options: o, names: fileNames, pages, sheets, fonts, resourcePack, dataPack, autotest, triggers, readme, stats, warnings };
 }
 
 export interface ExportArchives {

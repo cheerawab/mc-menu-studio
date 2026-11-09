@@ -3,6 +3,12 @@
 
 export type ExportMode = 'registry' | 'functions';
 export type AfterAction = 'close' | 'none';
+/**
+ * How command-like actions run (docs/VERIFIED.md §13). `trigger`: the button runs `trigger <obj> set <id>` (no
+ * permission, no confirm screen) and the data pack's tick function runs the real command as the player. `direct`: the
+ * button sends the command itself (Stage B behaviour).
+ */
+export type CommandMode = 'trigger' | 'direct';
 
 /** A model action with page links already resolved to page keys. */
 export type ExportAction =
@@ -48,6 +54,11 @@ export interface ExportOptions {
   /** registry mode only: bind the first page to the quick-actions key (G). */
   quickActions: boolean;
   afterAction: AfterAction;
+  /**
+   * `trigger` (what the export dialog and the CLI default to) or `direct`. Omitted = `direct`, so callers written
+   * before trigger mode existed keep their exact output.
+   */
+  commandMode?: CommandMode;
   /** Tile size in px (default 32). */
   tileSize?: number;
   /** Also build the auto-test data pack (Hermes). */
@@ -55,6 +66,31 @@ export interface ExportOptions {
 }
 
 export type FileMap = Map<string, Uint8Array>;
+
+/** Actions that get a trigger id: commands, close and (functions mode only) page navigation. */
+export type TriggerKind = 'command' | 'close' | 'page';
+
+/** One row of the trigger id table ("按鈕編號對照"). */
+export interface TriggerAction {
+  /** >= 1, the value the button sets: `trigger <objective> set <id>`. */
+  id: number;
+  kind: TriggerKind;
+  /** What `trigger_tick` runs as the player: the user's command (no leading slash), `dialog clear @s` or `function <ns>:show_<key>`. */
+  command: string;
+  /** Navigation only: the target page key. */
+  target?: string;
+  /** Key of the first page (export order) whose buttons use it; for a close id used only by the footer: the first page. */
+  firstPage: string;
+  /** Used only by the footer buttons (`after_action: none` gives the footer the close action). */
+  footerOnly: boolean;
+}
+
+export interface TriggerTable {
+  /** Scoreboard objective of type `trigger`: `mcms_<namespace>`. */
+  objective: string;
+  /** Ordered by id (1, 2, 3, ...). */
+  actions: TriggerAction[];
+}
 
 export interface ExportWarning {
   code: string;

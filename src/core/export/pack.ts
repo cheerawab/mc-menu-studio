@@ -9,12 +9,14 @@ import {
   SPACE_BITS,
   SPACE_NEG_BASE,
   SPACE_POS_BASE,
+  TRIGGER_FUNCTIONS,
   ZIP_DATE_MS,
   ZIP_DEFLATE_LEVEL,
 } from './constants';
 import { functionName, functionSource } from './dialogs';
 import type { Sheet } from './sheets';
-import type { ExportMode, FileMap } from './types';
+import { functionTag, triggerLoadSource, triggerTickSource, type AutotestTrigger } from './triggers';
+import type { ExportMode, FileMap, TriggerTable } from './types';
 
 const encoder = new TextEncoder();
 export const utf8 = (s: string): Uint8Array => encoder.encode(s);
@@ -62,7 +64,18 @@ export interface DataPage {
   dialog: Record<string, unknown>;
 }
 
-export function dataPackFiles(ns: string, description: string, mode: ExportMode, pages: DataPage[], quickActions: boolean): FileMap {
+/**
+ * Data pack: the pages (registry: dialog JSON; functions: one `dialog show` line each) and, in trigger mode with at
+ * least one id, `trigger_load` / `trigger_tick` registered in the minecraft:load / minecraft:tick function tags.
+ */
+export function dataPackFiles(
+  ns: string,
+  description: string,
+  mode: ExportMode,
+  pages: DataPage[],
+  quickActions: boolean,
+  triggers: TriggerTable | null = null,
+): FileMap {
   const files: FileMap = new Map();
   files.set('pack.mcmeta', jsonFile({ pack: { description, min_format: DATA_PACK_FORMAT, max_format: DATA_PACK_FORMAT } }));
   if (mode === 'registry') {
@@ -71,26 +84,41 @@ export function dataPackFiles(ns: string, description: string, mode: ExportMode,
   } else {
     for (const p of pages) files.set(`data/${ns}/function/${functionName(p.key)}.mcfunction`, utf8(functionSource(p.dialog)));
   }
+  if (triggers?.actions.length) {
+    files.set(`data/${ns}/function/${TRIGGER_FUNCTIONS.load}.mcfunction`, utf8(triggerLoadSource(triggers)));
+    files.set(`data/${ns}/function/${TRIGGER_FUNCTIONS.tick}.mcfunction`, utf8(triggerTickSource(triggers)));
+    files.set('data/minecraft/tags/function/load.json', jsonFile(functionTag(`${ns}:${TRIGGER_FUNCTIONS.load}`)));
+    files.set('data/minecraft/tags/function/tick.json', jsonFile(functionTag(`${ns}:${TRIGGER_FUNCTIONS.tick}`)));
+  }
   return files;
 }
 
 /** Tick at which the auto-test shows page k (VERIFIED §5). */
 export const autotestTick = (k: number) => AUTOTEST.firstTick + AUTOTEST.ticksPerPage * k;
 
+/** Trigger mode part of the auto-test: the objective of the menu and the tests to run after the last page. */
+export interface AutotestTriggerPlan {
+  objective: string;
+  tests: AutotestTrigger[];
+}
+
 /**
  * Hermes' auto-test data pack (VERIFIED §5): `load` (re)creates objective mcms_t and resets it; `tick` counts ticks per
- * player and at tick 120 + 800*k says `PAGE <key>` (for latest.log) and then shows page k.
+ * player and at tick 120 + 800*k says `PAGE <key>` (for latest.log) and then shows page k. Trigger mode adds the
+ * trigger tests (see autotestTriggers) during the last page: `say TRIGGER <label> id <N>`, then the player runs
+ * `trigger <objective> set <N>`; the `time set day` test sets midnight first and logs `TRIGGER CHECK time_day OK|FAIL`.
  */
-export function autotestFiles(ns: string, mode: ExportMode, keys: string[]): FileMap {
+export function autotestFiles(ns: string, mode: ExportMode, keys: string[], trigger: AutotestTriggerPlan | null = null): FileMap {
   const { namespace: at, objective: obj } = AUTOTEST;
   const files: FileMap = new Map();
-  files.set('pack.mcmeta', jsonFile({ pack: { description: `MC Menu Studio autotest (${ns}, ${mode})`, min_format: DATA_PACK_FORMAT, max_format: DATA_PACK_FORMAT } }));
+  const variant = trigger ? `${mode}, trigger` : mode;
+  files.set('pack.mcmeta', jsonFile({ pack: { description: `MC Menu Studio autotest (${ns}, ${variant})`, min_format: DATA_PACK_FORMAT, max_format: DATA_PACK_FORMAT } }));
   files.set('data/minecraft/tags/function/load.json', jsonFile({ values: [`${at}:load`] }));
   files.set('data/minecraft/tags/function/tick.json', jsonFile({ values: [`${at}:tick`] }));
   const load = [
     `scoreboard objectives add ${obj} dummy`,
     `scoreboard players reset * ${obj}`,
-    `say MCMS AUTOTEST LOADED ${ns} ${mode} ${keys.length} pages`,
+    `say MCMS AUTOTEST LOADED ${ns} ${mode} ${keys.length} pages${trigger ? `, trigger mode, ${trigger.tests.length} trigger tests` : ''}`,
   ];
   const tick = [`scoreboard players add @a ${obj} 1`];
   keys.forEach((key, k) => {
@@ -98,6 +126,19 @@ export function autotestFiles(ns: string, mode: ExportMode, keys: string[]): Fil
     tick.push(`execute as ${sel} run say PAGE ${key}`);
     tick.push(mode === 'registry' ? `execute as ${sel} run dialog show @s ${ns}:${key}` : `execute as ${sel} run function ${ns}:${functionName(key)}`);
   });
+  for (const t of trigger?.tests ?? []) {
+    const sel = `@a[scores={${obj}=${t.tick}}]`;
+    if (t.daytimeCheck) tick.push(`execute as ${sel} run time set midnight`);
+    tick.push(`execute as ${sel} run say TRIGGER ${t.label} id ${t.id}`);
+    tick.push(`execute as ${sel} run trigger ${trigger!.objective} set ${t.id}`);
+    if (t.daytimeCheck) {
+      const later = `@a[scores={${obj}=${t.tick + AUTOTEST.checkDelay}}]`;
+      const range = `${AUTOTEST.dayRange[0]}..${AUTOTEST.dayRange[1]}`;
+      tick.push(`execute as ${later} store result score #daytime ${obj} run time query daytime`);
+      tick.push(`execute as ${later} if score #daytime ${obj} matches ${range} run say TRIGGER CHECK ${t.label} OK`);
+      tick.push(`execute as ${later} unless score #daytime ${obj} matches ${range} run say TRIGGER CHECK ${t.label} FAIL`);
+    }
+  }
   tick.push(`execute as @a[scores={${obj}=${autotestTick(keys.length)}}] run say AUTOTEST DONE`);
   files.set(`data/${at}/function/load.mcfunction`, utf8(`${load.join('\n')}\n`));
   files.set(`data/${at}/function/tick.mcfunction`, utf8(`${tick.join('\n')}\n`));

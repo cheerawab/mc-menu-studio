@@ -53,7 +53,7 @@ export function validateAction(action: Action, project: Project, ownPageId?: Id)
         return {
           severity: 'warning',
           code: 'command-chat',
-          message: `「/${head}」屬於聊天指令，從選單點擊時遊戲不會執行。`,
+          message: `「/${head}」屬於聊天指令：匯出時選「直接執行」的話，點擊只會跳出確認畫面而不會執行（/trigger 模式可以執行）。`,
         };
       if (cmd.length > MAX_COMMAND_LENGTH)
         return { severity: 'warning', code: 'command-long', message: `指令超過 ${MAX_COMMAND_LENGTH} 個字元，可能無法執行。` };
