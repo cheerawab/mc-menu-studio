@@ -1,5 +1,10 @@
 # TECHNIQUE — pixel-positioned clickable GUIs inside the vanilla Dialog screen
 
+> **UPDATE: the core technique has now been verified in a real 26.3 client. Read `docs/VERIFIED.md` FIRST; it supersedes
+> this file wherever they differ** (notably: `plain_message.width` must be `W + 8 + 4`, not `W + 8`, otherwise the line wraps;
+> datapack dialogs make singleplayer show an "experimental settings" screen, so also offer a `functions` export mode with
+> inline dialogs). A working reference implementation of the exporter core is in `reference/spike/spike_gen.py`.
+
 Status legend: **[JAR]** confirmed by reading the shipped Minecraft 26.3 jars (Hermes did this).
 **[GW]** claimed by the Glyphwork author ("verified against the 26.3 client"), see `reference/glyphwork`.
 **[TEST]** must be confirmed in the real game by Hermes; this file will be updated with the result.
