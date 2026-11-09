@@ -1,0 +1,28 @@
+# dependencies
+node_modules
+/.pnp
+.pnp.*
+
+# build output
+.next
+out
+/build
+*.tsbuildinfo
+next-env.d.ts
+
+# testing
+/coverage
+
+# exports (generated)
+exports
+
+# read-only reference material
+reference
+
+# misc
+.env*
+*.log
+*.pem
+.DS_Store
+.vercel
+.claude/settings.local.json
