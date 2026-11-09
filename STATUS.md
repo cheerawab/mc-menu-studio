@@ -1,8 +1,9 @@
-# STATUS — Stage B (exporter + Export UI) — done
+# STATUS — Stage C (trigger mode) — done
 
-Stage A (editor, renderer, skins, templates, persistence) and Stage B (exporter, demo CLI, Export dialog) are
-implemented. The exporter is a TypeScript port of `reference/spike/spike_gen.py` and follows `docs/VERIFIED.md`.
-Nothing here was run in Minecraft (rule: never launch the game); Hermes tests the exports.
+Stage A (editor, renderer, skins, templates, persistence), Stage B (exporter, demo CLI, Export dialog) and Stage C
+(trigger command mode, footer/after_action corrections from the decompiled client) are implemented. The exporter
+follows `docs/VERIFIED.md` (§13 for Stage C). Nothing here was run in Minecraft by me (rule: never launch the game);
+Hermes tests the exports.
 
 ## How to run and test (exact commands)
 
@@ -11,138 +12,147 @@ npm install
 npm run dev            # editor at http://localhost:3737 (匯出 button opens the Export dialog)
 npm run lint           # eslint
 npm run typecheck      # tsc --noEmit, strict
-npm test               # vitest: 75 tests, ~2.5 s
+npm test               # vitest: 96 tests, ~3 s
 npm run build          # production build
-npm run demo:export -- --mode both --autotest   # -> exports/demo/{registry,functions}/ + exports/demo/HANDOFF.md
+npm run demo:export -- --mode both --autotest                    # trigger mode (default) -> exports/demo/ + HANDOFF.md
+npm run demo:export -- --mode both --autotest --commands direct --out exports/direct   # Stage B behaviour
 npm run preview:skins  # PNG previews of templates/icons/game mock -> exports/previews/
 ```
 
-Last run (this stage): lint ✓, typecheck ✓, test ✓ (75/75), build ✓, demo export ✓ (0.7 s; two runs give identical
-SHA-1 for all six zips), dev server ✓ (GET / 200, all chunks 200, the Export dialog code is in the served editor
-chunk, no errors in the server log; server stopped afterwards).
+Last run (this stage): lint ✓, typecheck ✓, test ✓ (96/96), build ✓, demo export ✓ (0.7 s; two runs give identical
+SHA-1 for all six zips and the READMEs). `--commands direct` reproduces the Stage B demo zips byte for byte (resource
+pack, data pack and autotest of both modes, compared by SHA-1 against an export made with the Stage B code before any
+change); a unit test pins the same property on a synthetic fixture. The resource pack is identical in all four
+combinations (registry/functions × trigger/direct). Dev server not started this stage (the dialog is covered by two
+jsdom tests and the production build).
 
-Demo export summary (`--mode both --autotest`): 9 pages (`calibration`, `lobby`, `lobby_rules`, `rules`,
-`rules_welcome`, `shop`, `quick`, `settings`, `notice`), 604 tiles of 32 px → 458 unique, 15 sheets (2 tile sheets +
-13 hit sizes), 471 private-use glyphs, 26 `y<N>` fonts (max N = 192), 53 regions → 59 hit glyphs;
-resourcepack.zip 89 KB (identical bytes for both modes), datapack.zip 8.4 KB (registry) / 8.1 KB (functions),
-autotest.zip 1.9 KB. Numbers come from the local fonts (text is rasterised with "Heiti TC" in Node on macOS).
+Demo export (trigger, `--mode both --autotest`): 9 pages, resource pack 89.0 KB (unchanged), datapack.zip 9.7 KB
+(registry, 27 ids) / 9.6 KB (functions, 30 ids: + 3 navigation ids), autotest.zip 2.1 KB.
 
-## What works (Stage B)
+## Stage C: what changed
 
-**Exporter core (`src/core/export/`, pure TS, same code in Node and the browser)**
-- `constants.ts`: the only place with client-metric assumptions, each tagged VERIFIED / DECOMPILED / WIKI / TEST.
-- `tiles.ts`: splits the page RGBA into 32 px tiles (option 8–128), skips fully transparent tiles, normalises
-  alpha-0 pixels, dedupes identical tiles across all pages (hash + byte compare), measures the client's actual width.
-- `sheets.ts`: packs unique tiles into PNG sheets (≤ 16 × 16 cells, chars grid padded with U+0000); code points from
-  U+E100 upward, never in U+E000–U+E02F; supplementary private use (U+F0000…) only after 6144 glyphs (warning).
-  One single-cell sheet per hit-glyph size (alpha 1/255 pixels).
-- `png.ts`: deterministic RGBA PNG encoder (adaptive filter by minimum sum, fflate level 9) + decoder for tests.
-- `layout.ts`: run list of the first line exactly like the spike: tiles in raster order with the move inside the
-  `y<N>` run, then hit glyphs (z-order, after all visuals) each in its own run with the move in a separate space-font
-  run, final move to exactly W, `ceil(H/9)` newlines. Binary space encoding (one sign, largest first, so the running
-  advance never overshoots). Merges neighbouring non-interactive runs. Checks the wrap rule
-  (`plain_message.width = W + 12`, running advance ≤ width − 8; peak is W + 1) and throws if violated.
-  Regions > 128 px per side are split into balanced cells; a cell ending above y = 7 is extended to the baseline.
-- `dialogs.ts`: text components (`color #ffffff`, `shadow_color 0` on every run), click/hover events only on hit
-  runs, `notice` dialog (`pause:false`, `after_action` option, footer label/width 150), function source
-  `dialog show @s {SNBT}`. Actions: page → `show_dialog` (registry) or `run_command function <ns>:show_<key>`
-  (functions); command → `run_command` (no leading slash); url → `open_url`; copy → `copy_to_clipboard`;
-  close → `run_command dialog clear @s`; tooltip → `show_text`.
-- `snbt.ts`: JSON → SNBT (quoted keys, `"` `\` `\n` escaped, raw private-use/CJK characters, mixed lists).
-- `pack.ts`: resource pack (`pack.mcmeta` 97, `space.json`, `y<N>.json` with only the sheets drawn at N, sheets),
-  data pack (121; registry: `dialog/<key>.json` + optional `quick_actions` tag; functions: `function/show_<key>.mcfunction`),
-  autotest pack, and byte-reproducible zips (sorted names, explicit directory entries, fixed UTC timestamp, fixed
-  deflate level, PNG/zip entries stored). JSON is written with `\uXXXX` escapes (like the verified spike).
-- `readme.ts` (README_zh-TW.txt), `project.ts` (Project → pages via the shared `renderPage`, link → key, export
-  checks), `calibration.ts` (256×160 grid page with 6 test regions), `demo.ts` (demo page set), `index.ts`
-  (`buildExport`, `zipExport`, `zipBundle`).
+**Trigger mode** (`ExportOptions.commandMode: 'trigger' | 'direct'`; the export dialog and the CLI default to
+`trigger`; the core treats an omitted value as `direct`, so pre-Stage-C callers and the golden tests keep their bytes).
+Why (VERIFIED §13): a `run_command` click that needs permissions opens Minecraft's confirm screen on every click and
+does not work for normal players; `/trigger` needs no permission.
+- Objective `mcms_<namespace>` (type `trigger`). Code: `src/core/export/triggers.ts`.
+- Ids ≥ 1 for every `command` action, every `close` action and (functions mode only) every page link, in order of first
+  appearance (pages in export order, regions in z-order); identical actions share an id (commands compared after
+  normalisation, so `/time set day` and `time set day` are one id). Registry navigation stays `show_dialog`; `copy` and
+  `url` are unchanged. The click becomes `run_command` `trigger mcms_<ns> set <N>`.
+- Data pack (both packaging modes, only when at least one id exists): `data/<ns>/function/trigger_load.mcfunction`
+  (`scoreboard objectives add <obj> trigger`) and `trigger_tick.mcfunction` (one
+  `execute as @a[scores={<obj>=<N>}] at @s run <command>` per id, then `scoreboard players set @a[scores={<obj>=1..}] <obj> 0`,
+  then `scoreboard players enable @a <obj>`), registered in `data/minecraft/tags/function/{load,tick}.json`. Tag entries
+  are `{"id": ..., "required": false}`: a missing required entry fails the whole merged tag, so a broken trigger_tick
+  would otherwise also stop every other pack's load/tick functions (and Hermes' autotest).
+- Commands go in verbatim (no escaping). Validation: newline → error (cannot happen after normalisation), trailing `\`
+  → error (mcfunction line continuation would glue it to the next line), > 256 characters → warning. Leading slashes
+  and spaces are stripped (they would not parse after `run `).
+- Footer with `after_action: none` (DECOMPILED §13: the footer then does nothing): the footer button gets the close
+  action of the command mode (`trigger <obj> set <close id>` or `dialog clear @s` in direct mode). If no button uses
+  close, its id is appended after all buttons, so switching the footer setting never renumbers buttons. `close` keeps
+  today's footer (no action). Esc always closes.
+- `buildExport` returns `triggers: { objective, actions: [{ id, kind, command, target?, firstPage, footerOnly }] }`
+  (null in direct mode). The CLI prints it, HANDOFF.md has one table per mode, README_zh-TW.txt lists it as
+  「按鈕編號對照」 with the warnings below.
 
-**CLI**: `npm run demo:export -- [--mode registry|functions|both] [--out exports/demo] [--autotest]` (tsx +
-@napi-rs/canvas). Demo = `calibration` first (its bottom-left square links to `lobby`), then every template page
-(each rendered with its own template project/skin; keys `lobby`, `lobby_rules`, `rules`, `rules_welcome`, …).
-Writes `<out>/<mode>/{resourcepack.zip,datapack.zip,README_zh-TW.txt[,autotest.zip]}` and `<out>/HANDOFF.md`
-(page table, auto-test ticks, what to check). Autotest: `load` creates/resets objective `mcms_t`; `tick` adds 1 per
-player and at tick 120 + 800·k runs `say PAGE <key>` then shows page k; `say AUTOTEST DONE` after the last page.
+**Auto-test** (`--autotest`, trigger mode only; page schedule 120 + 800·k unchanged): at T+40, T+120, T+200 (T = tick of
+the last page) `say TRIGGER <label> id <N>` then `trigger <obj> set <N>` as the player, for the `time set day` id, the
+`weather clear` id, and the navigation id that opens `lobby` (functions) / the close id (registry). Because tick
+functions run silently, the time test sets midnight first and logs `TRIGGER CHECK time_day OK|FAIL` 20 ticks later
+(`time query daytime` in 1000..1100). `say AUTOTEST DONE` stays at 120 + 800·pages. Expected log lines: HANDOFF.md.
 
-**Export dialog (匯出 button)**: namespace + menu name, mode cards with plain zh-TW explanations (registry: servers,
-G key, singleplayer shows Minecraft's experimental-settings screen each time the world opens; functions: no warning,
-needs cheats/OP, no G key), G-key toggle (registry only), footer-button behaviour (close / keep open, marked 尚待實機驗證),
-checks (errors block the download; warnings/info and build warnings listed), statistics, downloads (resource pack,
-data pack, "全部下載" bundle = both zips + README_zh-TW.txt), step-by-step guides for singleplayer and servers, notes
-(static picture, what is verified vs 尚待實機驗證, permissions, font licensing). The build runs in the browser
-(debounced, cancels stale builds, waits for images to decode). Mode/G-key/footer choices are remembered.
+**Export dialog**: new section 「指令執行方式」 with two cards (「/trigger（建議）」 / 「直接執行」), the line
+「這個專案有 N 個指令動作」 (+ number of ids after the build), 尚待實機驗證 marker; the checks list now shows the
+export-only notes (`export-trigger` info: anyone can run the actions with /trigger; `export-direct` warning: confirm
+screen / normal players). Footer select is now 「點擊選單後」: 「點擊後關閉（建議）」 (any click closes; navigation opens
+the next page) / 「保持開啟」 (the footer button closes, Esc too). Functions-mode texts say that only opening the menu needs
+/function when trigger mode is on. The choice is remembered with the other export prefs.
 
-**Model**: `settings.footerLabel` (default 關閉) and `page.footerLabel` (null = project default); older JSON gets the
-defaults; inspector fields (project + page), validation (empty / probably too long for the 150 px button), used by
-the in-game mock and the exporter (`effectiveFooterLabel`).
+**Checks**: `checkExport(project, { mode, commandMode })`; `countCommandActions(project, mode)`; the `command-chat`
+warning (say/tell…) is dropped in trigger mode (functions run them) and its text now matches §13 (direct mode → confirm
+screen). **CLI**: `--commands trigger|direct` (parser in `scripts/demo-args.ts`, unit-tested).
 
-**Game mock**: `GAME_CHROME` now uses the measured values (picture top 67, footer button 150×20 ending 6 px above the
-bottom, title baseline ~16) and marks the rest as estimates; the widget width is W + 12; fit checks share
-`fitProblem()`.
+**Docs**: README (usage, both command modes), CLAUDE.md (command line), this file, HANDOFF.md (generated).
 
-**Tests** (75): golden client simulation (`src/core/__tests__/helpers/clientSim.ts`) re-reads the GENERATED font
-JSON, sheet PNGs and dialogs (JSON, or SNBT parsed back from the .mcfunction), lays the line out with the client's
-advance model (space table, actual width + 1, ascent offsets, running-width check against width − 8) and asserts:
-every tile pixel lands at its source position (exact RGBA), the line ends at W with `ceil(H/9)` newlines, every hit
-box ≤ 128 px and the union of hit boxes per event equals its region, "last glyph wins" gives the topmost region at
-every sampled point, events only on single-glyph runs, white + shadow 0 everywhere. Run for synthetic pages
-(opaque/duplicate/empty/partial/edge/translucent tiles, overlapping, split, clipped, hover-only, top-band regions),
-the calibration page, and all 8 template pages rendered by the shared renderer, in both modes. Mutation checks done
-while writing: dropping the +1 advance or reversing hit order makes the golden test fail. Units: space encoding,
-dedupe, actual width, sheets, code point allocation, PNG round trip, SNBT (escapes, private use, emoji, mixed lists,
-round trip), event mapping, splitting, wrap rule, autotest schedule, zip determinism (names, dirs, dates), both
-modes, identical resource pack across modes, determinism over fresh renders, one page/no regions, 24 linked pages,
-invalid input. UI: jsdom smoke test opens the dialog; a second jsdom test builds with @napi-rs/canvas, checks the
-stats, switches modes and verifies the downloaded zips' contents.
+**Tests** (+21): id assignment/dedupe/order (both modes), exact `trigger_tick`/`trigger_load` text, tags only in trigger
+mode and only with ids, click events per action type, direct mode = Stage B bytes (pinned hashes) and identical resource
+pack, footer action for `close`/`none` × trigger/direct incl. the footer-only id, autotest lines and schedule,
+README table, zip determinism in trigger mode, a trigger-mode client simulation of all demo pages (same pixels and hit
+boxes as direct, every click mapped through the id table), export checks, CLI flag parsing, a jsdom test of the new
+dialog section (default trigger, count, checks entry, data pack contents, switch to direct, remembered pref).
+The existing golden tests are unchanged and pass.
 
-## Known gaps
+## Verified / not verified
 
-- Not seen in a real browser by me (no browser automation per the rules): the Export dialog was checked by two jsdom
-  tests, the production build and the dev server (chunks load). Please click through it once at http://localhost:3737.
-- Exported pictures depend on the fonts of the machine that exports (browser export = exact WYSIWYG of the editor;
-  Node export uses Skia with the local fonts, slightly different text). No fonts are bundled (owner decision).
-- The browser build runs on the main thread (a few hundred ms for typical projects; large projects may stutter).
-- No per-page skins, no "trigger mode" for non-op players (Stage C idea), no pause-screen (`pause_screen_additions`)
-  option, the G key always opens the first page.
-- The editor mock treats the topmost region as blocking; in the client a hover-only region does not block clicks of
-  a clickable region below it (only glyphs with a click event take part in the click walk, VERIFIED §10).
-- Regions that end above y = 7 get a hit box extended down to y = 7 (warning shown); unavoidable with `ascent ≤ height`.
+- VERIFIED in game (§12, Stage B, functions mode): every demo page renders pixel-exactly; `shadow_color: 0` works;
+  inline `dialog show @s {SNBT}` works; packs load without warnings.
+- DECOMPILED (§13), not clicked: click hit-testing; `after_action` semantics; the confirm screen for privileged
+  `run_command`; `/trigger` parses without permissions and should run silently.
+- NOT TESTED: any click in the game (including that a `/trigger` click shows no confirm screen), hover tooltips, the
+  footer button with an action under `after_action: none`, Esc, G key, registry mode in game, servers.
+- To be tested by Hermes with `--autotest` (no mouse needed): the server side of trigger mode (trigger → `trigger_tick`
+  → command as the player). `TRIGGER CHECK time_day OK` in the log proves the chain; weather/close/navigation are
+  visual checks (see HANDOFF.md).
+
+## Known gaps and risks
+
+- **One bad command disables every trigger button**: all commands are lines of one `trigger_tick` file; if any line
+  does not parse (typo, wrong item id), Minecraft does not load the function (`Failed to load function
+  <ns>:trigger_tick` in the log). The README/UI say so. Alternative: one function per id (open question below).
+- Commands run from a tick function are silent: feedback-only commands (`random value`, `list`, `time query`) show
+  nothing to the player in trigger mode (the demo's calibration dice buttons look dead; expected). Use `tellraw @s`.
+- Anyone can type `/trigger mcms_<ns> set <N>` to run any menu action without the menu (by design; documented).
+- Functions mode: opening the first page still needs `/function` (cheats/OP); there is no "open menu" id.
+- Navigation in functions + trigger + `after_action: close`: the click closes the dialog, the server opens the next page
+  one tick later (a brief flash of the game is expected). Registry navigation is unchanged (`show_dialog`).
+- Values set by hand that are ≤ 0 (`/trigger … set -5`) are not reset (harmless: no id ≤ 0).
+- From Stage B: exported pictures depend on the exporting machine's fonts; the browser build runs on the main thread; no
+  per-page skins; no `pause_screen_additions`; the G key always opens the first page; the editor mock treats the topmost
+  region as blocking (in the client a hover-only region does not block clicks below it, §10); regions ending above
+  y = 7 get a hit box extended to y = 7 (warning).
 
 ## Assumptions to verify in game
 
 All exporter numbers are in `src/core/export/constants.ts`; mock metrics in `GAME_CHROME` (`src/core/game/chrome.ts`).
 
-1. `shadow_color: 0` removes the 1 px dark band on the right/bottom of the picture (VERIFIED §9 says documented, not seen).
+1. ~~`shadow_color: 0` removes the dark band~~ — VERIFIED (§12).
 2. Hit glyphs (every pixel alpha 1/255) are invisible and their click box is the full cell. NOT TESTED.
 3. `click_event`/`hover_event` on glyph runs inside a `plain_message` work (run_command, show_dialog, open_url,
    copy_to_clipboard, show_text incl. multi-line tooltips). NOT TESTED.
 4. `run_command` without a leading slash (wiki: optional; the spike used none).
-5. **`after_action` default changed to `close`** (the spike used `none`). Per the wiki, `none` "does nothing, keeps the
-   dialog open", so a footer button labelled 關閉 would not close the dialog; `close` is the safer default and `none`
-   stays selectable. To check: does `close` also close the dialog after a body click (text click events)?
-6. The 「關閉選單」 action runs `dialog clear @s` (needs permission level 2; fails for normal players on servers).
-7. functions mode navigation `function <ns>:show_<key>` from a click (permission level 2; singleplayer with cheats).
-8. A single-entry `quick_actions` tag opens the dialog directly with G.
+5. ~~`after_action` semantics~~ — **RESOLVED by decompilation, see VERIFIED §13**: `close` closes after any body click
+   (navigation still opens the next dialog); `none` keeps the dialog and the footer button only runs its own action,
+   so the exporter now gives the footer the close action under `none`.
+6. The 「關閉選單」 action runs `dialog clear @s` (permission level 2): direct mode → confirm screen / fails for normal
+   players (§13); trigger mode → runs from `trigger_tick`. Trigger path NOT TESTED.
+7. Functions-mode navigation from a click: direct → confirm screen on every click (§13); trigger → `function
+   <ns>:show_<key>` from `trigger_tick`. NOT TESTED.
+8. A single-entry `quick_actions` tag opens the dialog directly with G. NOT TESTED.
 9. Vertical offsets above 288 (pages taller than ~300 px; the model allows 600) and supplementary private-use code
    points (> 6144 glyphs) are untested; the exporter warns in both cases.
 10. Picture placement in the mock is measured only at GUI 3 / 853×480 GUI px (top 67). Other GUI scales/windows, and
     whether the top stays at 67 when the picture is taller than the window (scrolling), are not measured.
 11. The footer label width estimate (CJK ≈ 9 px, others ≈ 6 px; warn above 140 px) is a guess.
-12. From Stage A, still open: glyph pixels with alpha < 10 % are discarded by the shader [GW]; chat commands
-    (say/tell/msg/me…) do not run from clicks; command length > 256 may be rejected; `open_url` http(s) only.
+12. From Stage A, still open: glyph pixels with alpha < 10 % are discarded by the shader [GW]; command length > 256 may be
+    rejected in direct mode (warning in both modes); `open_url` http(s) only. Chat commands (say/tell…): direct → confirm
+    screen (§13), trigger → run by the function (NOT TESTED).
+13. A `trigger <obj> set <N>` click runs without any confirm screen (§13: parses without permissions). NOT TESTED.
+14. `trigger_tick` dispatches as the player with the function permission level (default 2) — Hermes' autotest checks it.
+15. Function tag entries `{"id": …, "required": false}` load in 26.3 (standard format since 1.16.2; the verified
+    autotest pack uses plain strings).
 
 ## Deviations from the spike (none from VERIFIED.md)
 
-- Tiles are deduped across all pages and packed into shared sheets; each `y<N>` font lists only the sheets drawn at N
-  (the spike listed every sheet in every font). Same rendering, smaller fonts.
-- Moves before hit glyphs always go into a separate space-font run (the spike kept negative moves inside the event
-  run); VERIFIED §10 says spaces must not carry events.
-- Regions > 128 px are split (the spike had no large regions); `after_action` default `close` (see 5 above).
+- Tiles are deduped across all pages and packed into shared sheets; each `y<N>` font lists only the sheets drawn at N.
+- Moves before hit glyphs always go into a separate space-font run (VERIFIED §10: spaces must not carry events).
+- Regions > 128 px are split; `after_action` default `close`; trigger mode (Stage C) is new.
 
-## Open questions (Stage C)
+## Open questions (Stage D)
 
-- Should exports bundle an OFL font (e.g. Noto Sans TC) so browser and Node exports are identical and licensing is
-  simple? (Currently: user's own fonts, with a zh-TW note.)
-- Trigger mode (`/trigger` + tick function) so normal players can press buttons that run privileged commands?
-- G-key target page selectable? `pause_screen_additions` option?
-- Move the browser build into a Web Worker if projects get large.
+- One function per trigger id (`trigger_tick` would call `function <ns>:trigger/<N>`), so a command that does not parse
+  only breaks its own button instead of all of them?
+- An "open menu" trigger id (functions mode), so normal players can open the menu with `/trigger`?
+- Bundle an OFL font (e.g. Noto Sans TC) so browser and Node exports are identical? G-key target page selectable?
+  `pause_screen_additions` option? Move the browser build into a Web Worker?

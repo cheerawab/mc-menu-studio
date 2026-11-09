@@ -132,7 +132,8 @@ export function readmeText(i: ReadmeInfo): string {
   if (i.hasCommands)
     add(
       trig
-        ? '- 「執行指令」按鈕透過 /trigger 執行：一般玩家也能使用，指令以函數權限執行；/say 等聊天指令也能執行。'
+        ? '- 「執行指令」按鈕透過 /trigger 執行：一般玩家也能使用，指令以函數權限執行；/say 等聊天指令也能執行。' +
+            '指令的回饋訊息（例如 /random value 的結果）不會顯示給玩家，需要顯示文字時請用 /tellraw @s。'
         : '- 「執行指令」按鈕直接送出指令，玩家需要對應的權限：需要權限的指令（time、weather、gamemode、give、function、dialog…）' +
             '每次點擊都會先跳出 Minecraft 的「確認指令執行」畫面，一般玩家無法使用；/say、/tell 等聊天指令也只會跳出確認畫面。',
     );
