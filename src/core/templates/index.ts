@@ -1,5 +1,5 @@
 // Built-in templates (zh-TW content). Only harmless commands are used.
-import { createElement, createPage, createProject, type ElementProps } from '../model/defaults';
+import { createElement, createPage, createProject, defaultSettings, type ElementProps } from '../model/defaults';
 import type { Action, Element, IconId, Page, Project, SkinId } from '../model/types';
 import { ICON_LABELS } from '../render/icons';
 
@@ -78,7 +78,7 @@ function lobby(): Project {
   ];
   return createProject({
     name: '星光伺服器大廳', namespace: 'lobby', skinId: 'dark', pages: [main, rules],
-    settings: { fontFamily: createProject().settings.fontFamily, accent: '#34d399' },
+    settings: { ...defaultSettings(), accent: '#34d399' },
   });
 }
 
@@ -206,7 +206,7 @@ function settings(): Project {
   ];
   return createProject({
     name: '遊戲設定', namespace: 'settings', skinId: 'dark', pages: [p],
-    settings: { fontFamily: createProject().settings.fontFamily, accent: '#8b5cf6' },
+    settings: { ...defaultSettings(), accent: '#8b5cf6' },
   });
 }
 

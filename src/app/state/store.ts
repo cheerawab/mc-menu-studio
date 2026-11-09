@@ -49,7 +49,7 @@ export interface EditorState {
   view: ViewState;
   toasts: Toast[];
   confirm: ConfirmRequest | null;
-  dialog: 'templates' | null;
+  dialog: 'templates' | 'export' | null;
   rightTab: RightTab;
   /** Incremented to ask the inspector to focus the text field of the selected element. */
   focusTextNonce: number;

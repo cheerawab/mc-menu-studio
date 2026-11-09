@@ -28,6 +28,8 @@ export interface ProjectSettings {
   fontFamily: string;
   /** Accent colour override for the skin (null = skin default). */
   accent: string | null;
+  /** Label of the dialog's footer button (the game's `notice` action), default "關閉". Pages may override it. */
+  footerLabel: string;
 }
 
 export interface Project {
@@ -52,6 +54,8 @@ export interface Page {
   height: number;
   /** Background fill of the page bitmap; null = transparent. */
   bgColor: string | null;
+  /** Footer button label for this page; null = use the project default (settings.footerLabel). */
+  footerLabel: string | null;
   /** Bottom to top (paint order). */
   elements: Element[];
 }

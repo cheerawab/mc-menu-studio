@@ -43,6 +43,25 @@ export function loadedImages(assets: Record<string, Asset>): Map<string, ImageLi
   return out;
 }
 
+/** Resolves once every asset image has loaded or failed (max `timeoutMs`), so an export does not miss images. */
+export function whenImagesReady(assets: Record<string, Asset>, timeoutMs = 5000): Promise<void> {
+  ensureImages(assets);
+  const waits = Object.keys(assets).map((id) => {
+    const e = cache.get(id);
+    if (!e || e.ok) return Promise.resolve();
+    if (e.img.complete) {
+      if (e.img.naturalWidth > 0) e.ok = true;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      e.img.addEventListener('load', () => resolve(), { once: true });
+      e.img.addEventListener('error', () => resolve(), { once: true });
+    });
+  });
+  const all = Promise.all(waits).then(() => undefined);
+  return Promise.race([all, new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
+}
+
 const subscribe = (l: () => void) => {
   listeners.add(l);
   return () => listeners.delete(l);

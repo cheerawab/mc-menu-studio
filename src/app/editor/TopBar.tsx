@@ -9,7 +9,7 @@ import { parseProjectJson } from '@/core/model/serialize';
 import { blankProject } from '@/core/templates';
 import { exportProjectJson } from '../state/persistence';
 import { editor, useEditor } from '../state/store';
-import { Button, cx, IconButton, Segmented, Select } from './ui';
+import { Button, IconButton, Segmented, Select } from './ui';
 
 function Logo() {
   return (
@@ -197,11 +197,9 @@ export default function TopBar() {
         <LayoutTemplate size={14} /> 範本
       </Button>
       <FileMenu />
-      <span title="匯出資源包與資料包：第二階段（Stage B）推出" className="inline-flex">
-        <Button variant="primary" size="sm" disabled aria-disabled className={cx('pointer-events-none')}>
-          <Package size={14} /> 匯出
-        </Button>
-      </span>
+      <Button variant="primary" size="sm" title="匯出 Minecraft 資源包與資料包" onClick={() => editor().openDialog('export')}>
+        <Package size={14} /> 匯出
+      </Button>
     </header>
   );
 }

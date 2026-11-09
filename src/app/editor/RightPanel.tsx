@@ -5,7 +5,7 @@ import {
   Terminal, TriangleExclamationPoint, Workflow,
 } from 'lucide-react';
 import { useMemo } from 'react';
-import { gameLayout, WINDOW_PRESETS } from '@/core/game/chrome';
+import { fitProblem, WINDOW_PRESETS } from '@/core/game/chrome';
 import { isInteractive } from '@/core/model/defaults';
 import type { Action, Id, Page } from '@/core/model/types';
 import { countIssues, validateProject, type Issue } from '@/core/model/validate';
@@ -19,14 +19,7 @@ function useIssues(): Issue[] {
   const windowId = useEditor((s) => s.view.windowId);
   return useMemo(() => {
     const win = WINDOW_PRESETS.find((w) => w.id === windowId) ?? WINDOW_PRESETS[1];
-    return validateProject(project, {
-      fitCheck: (page: Page) => {
-        const L = gameLayout(win.w, win.h, guiScale, page.width, page.height);
-        if (!L.fitsWidth) return `在 ${win.label}、GUI ${guiScale} 下寬度超出視窗。`;
-        if (!L.fitsHeight) return `在 ${win.label}、GUI ${guiScale} 下高度不足，玩家需要捲動才看得到全部。`;
-        return null;
-      },
-    });
+    return validateProject(project, { fitCheck: (page: Page) => fitProblem(win, guiScale, page) });
   }, [project, guiScale, windowId]);
 }
 

@@ -1,6 +1,6 @@
 import { createCanvas } from '@napi-rs/canvas';
 import { describe, expect, it } from 'vitest';
-import { drawGameMock, gameLayout, autoGuiScale, widgetHeight } from '../game/chrome';
+import { drawGameMock, fitProblem, gameLayout, autoGuiScale, widgetHeight, GAME_CHROME, WINDOW_PRESETS } from '../game/chrome';
 import { createElement, createPage, createProject } from '../model/defaults';
 import { ICON_IDS } from '../model/types';
 import type { Element } from '../model/types';
@@ -144,6 +144,17 @@ describe('icons, templates and game chrome', () => {
     expect(L.fitsWidth).toBe(true);
     expect(L.widget.h).toBe(widgetHeight(200));
     expect(gameLayout(1280, 720, 4, 320, 200).fitsHeight).toBe(false);
+    // measured in the real client (VERIFIED §1/§8): 853x480 GUI px at scale 3, picture top 67, footer button 6 px above
+    // the bottom, and a 300 px tall picture still fits
+    const M = gameLayout(1280, 720, 3, 256, 300);
+    expect([M.guiW, M.guiH, M.page.y, M.page.x]).toEqual([426, 240, GAME_CHROME.pictureTop, 85]);
+    const T = gameLayout(2560, 1440, 3, 120, 300);
+    expect(T.fitsHeight).toBe(true);
+    expect(T.footerButton).toEqual({ x: Math.floor((853 - 150) / 2), y: 480 - 6 - 20, w: 150, h: 20 });
+    expect(T.widget.w).toBe(120 + 12);
+    expect(fitProblem(WINDOW_PRESETS[0], 4, { width: 320, height: 200 })).toMatch(/寬度超出/);
+    expect(fitProblem(WINDOW_PRESETS[0], 4, { width: 300, height: 200 })).toMatch(/高度不足/);
+    expect(fitProblem(WINDOW_PRESETS[1], 3, { width: 320, height: 200 })).toBeNull();
     const env = makeEnv();
     const c = env.createCanvas(L.guiW, L.guiH);
     drawGameMock(c.getContext('2d') as Ctx2D, env, L, { title: '測試', page: null, fontFamily: '' });

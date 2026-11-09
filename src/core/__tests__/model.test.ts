@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createElement, createPage, createProject, normalizeElement } from '../model/defaults';
+import { createElement, createPage, createProject, effectiveFooterLabel, normalizeElement } from '../model/defaults';
 import { slugify, uniqueKey, uniqueName } from '../model/ids';
 import {
   addElements, addPage, collectLinks, duplicateElements, duplicatePage, moveElementsZ, movePage, removePage,
@@ -121,6 +121,27 @@ describe('serialisation', () => {
     expect(() => parseProjectJson('{not json')).toThrow();
     expect(() => normalizeProject({ foo: 1 })).toThrow();
     expect(() => normalizeProject({ version: 99, pages: [{}] })).toThrow(/較新的版本/);
+  });
+  it('adds the footer label fields to older files and keeps them on round trips', () => {
+    const old = normalizeProject({ settings: { fontFamily: 'X' }, pages: [{ key: 'a' }] }).project;
+    expect(old.settings).toMatchObject({ fontFamily: 'X', footerLabel: '關閉' });
+    expect(old.pages[0].footerLabel).toBeNull();
+    const p = projectWith(0);
+    p.settings.footerLabel = '離開';
+    p.pages[0].footerLabel = '返回大廳';
+    expect(parseProjectJson(serializeProject(p)).project).toEqual(p);
+    const odd = normalizeProject({ settings: { footerLabel: 5 }, pages: [{ key: 'a', footerLabel: '   ' }] }).project;
+    expect([odd.settings.footerLabel, odd.pages[0].footerLabel]).toEqual(['關閉', null]);
+  });
+  it('resolves the footer label: page override, project default, then 關閉', () => {
+    const p = projectWith(0);
+    const page = p.pages[0];
+    expect(effectiveFooterLabel(page, p)).toBe('關閉');
+    p.settings.footerLabel = '  離開 ';
+    expect(effectiveFooterLabel(page, p)).toBe('離開');
+    expect(effectiveFooterLabel({ ...page, footerLabel: '返回\n大廳' }, p)).toBe('返回 大廳');
+    p.settings.footerLabel = '';
+    expect(effectiveFooterLabel(page, p)).toBe('關閉');
   });
   it('regenerates duplicate ids', () => {
     const raw = { pages: [{ id: 'same', elements: [{ type: 'panel', id: 'same' }] }] };

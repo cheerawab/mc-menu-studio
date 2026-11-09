@@ -2,7 +2,8 @@
 
 import { CircleCheck, CircleX, RotateCcw } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { autoGuiScale, drawGameMock, drawWorld, GAME_CHROME, gameLayout, WINDOW_PRESETS, type GuiScale } from '@/core/game/chrome';
+import { autoGuiScale, drawGameMock, drawWorld, gameLayout, WINDOW_PRESETS, type GuiScale } from '@/core/game/chrome';
+import { effectiveFooterLabel } from '@/core/model/defaults';
 import { containsPoint } from '@/core/geometry';
 import { cleanCommand } from '@/core/model/validate';
 import type { Region } from '@/core/model/types';
@@ -50,7 +51,7 @@ export default function GamePreview() {
       return;
     }
     const { canvas } = renderPageToCanvas(page, project, env, { placeholders: false });
-    drawGameMock(ctx, env, L, { title: page.title, page: canvas, fontFamily: project.settings.fontFamily });
+    drawGameMock(ctx, env, L, { title: page.title, page: canvas, fontFamily: project.settings.fontFamily, footerLabel: effectiveFooterLabel(page, project) });
   }, [L, page, project, closed, imagesVersion]);
 
   const pad = 24;
@@ -67,8 +68,7 @@ export default function GamePreview() {
     for (let i = regions.length - 1; i >= 0; i--) if (containsPoint(regions[i], px, py)) return regions[i];
     return null;
   };
-  const fb = GAME_CHROME.footerButton;
-  const footerRect = { x: Math.floor((L.guiW - fb.w) / 2), y: L.footer.y + Math.floor((L.footer.h - fb.h) / 2), w: fb.w, h: fb.h };
+  const footerRect = L.footerButton;
 
   const onClick = (e: ReactMouseEvent) => {
     if (closed) return;
@@ -108,7 +108,7 @@ export default function GamePreview() {
   const scales: GuiScale[] = [1, 2, 3, 4];
   const auto = autoGuiScale(win.w, win.h);
   const fits = L.fitsWidth && L.fitsHeight;
-  const bodyAvail = L.body.h - GAME_CHROME.bodyTopPadding - GAME_CHROME.bodyBottomPadding;
+  const bodyAvail = L.widgetSpace;
   const pointer = hover?.region && hover.region.action.type !== 'none';
 
   return (

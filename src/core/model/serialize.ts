@@ -82,6 +82,7 @@ function normalizePage(raw: unknown, warnings: string[], index: number): Page {
     width: clamp(Math.round(num(r.width, PAGE_LIMITS.defaultW)), 1, 4096),
     height: clamp(Math.round(num(r.height, PAGE_LIMITS.defaultH)), 1, 4096),
     bgColor: typeof r.bgColor === 'string' ? r.bgColor : null,
+    footerLabel: typeof r.footerLabel === 'string' && r.footerLabel.trim() ? r.footerLabel : null,
     elements: els.map((e) => normalizeElementJson(e, warnings)).filter((e): e is Element => e !== null),
   });
 }
@@ -143,6 +144,7 @@ export function normalizeProject(input: unknown): LoadResult {
   const settings = { ...defaultSettings() };
   if (typeof s.fontFamily === 'string' && s.fontFamily.trim()) settings.fontFamily = s.fontFamily;
   if (typeof s.accent === 'string') settings.accent = s.accent;
+  if (typeof s.footerLabel === 'string') settings.footerLabel = s.footerLabel;
 
   const project = createProject({
     id: str(r.id, '') || newId(),

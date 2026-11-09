@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createElement, createPage, createProject } from '../model/defaults';
-import { cleanCommand, validateAction, validateProject } from '../model/validate';
+import { cleanCommand, estimateGameTextWidth, validateAction, validateProject } from '../model/validate';
 
 const base = () => {
   const a = createPage({ key: 'a', title: 'A' });
@@ -61,5 +61,17 @@ describe('validateProject', () => {
     const issues = validateProject(p, { fitCheck: () => '放不下' });
     expect(issues.some((i) => i.code === 'page-unreachable' && i.pageId === p.pages[1].id)).toBe(true);
     expect(issues.filter((i) => i.code === 'page-fit')).toHaveLength(2);
+  });
+  it('warns about empty or too long footer labels', () => {
+    const p = base();
+    expect(validateProject(p).some((i) => i.code.startsWith('footer'))).toBe(false);
+    p.settings.footerLabel = ' ';
+    expect(validateProject(p).find((i) => i.code === 'footer-empty')?.severity).toBe('warning');
+    p.settings.footerLabel = '關閉';
+    p.pages[1].footerLabel = '這是一段非常非常非常非常長的按鈕文字';
+    const long = validateProject(p).filter((i) => i.code === 'footer-long');
+    expect(long.map((i) => i.pageId)).toEqual([p.pages[1].id]);
+    expect(estimateGameTextWidth('關閉')).toBe(18);
+    expect(estimateGameTextWidth('OK')).toBe(12);
   });
 });

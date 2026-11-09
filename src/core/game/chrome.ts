@@ -1,6 +1,8 @@
-// In-game mock preview of the vanilla Dialog screen.
-// ALL metrics below are approximations (see docs/TECHNIQUE.md §4, §6) and live in ONE object so they can be
-// calibrated from real screenshots. Units are GUI pixels (screen pixels / GUI scale).
+// In-game mock preview of the vanilla Dialog screen. All metrics live in ONE object so they can be calibrated from
+// real screenshots. Units are GUI pixels (screen pixels / GUI scale).
+// MEASURED = docs/VERIFIED.md §1/§8 (real 26.3 client, GUI scale 3, 1280x720 window = 853x480 GUI px);
+// everything else is an estimate.
+import { WIDGET_PADDING, WIDTH_MARGIN } from '../export/constants';
 import type { Rect } from '../model/types';
 import { mix } from '../render/color';
 import { fill, hash2 } from '../render/pixel';
@@ -9,32 +11,37 @@ import type { Ctx2D, ImageLike, RenderEnv } from '../render/types';
 import { vanillaSkin } from '../skins/vanilla';
 
 export const GAME_CHROME = {
-  /** Header (title + warning button) height. Guess: HeaderAndFooterLayout default. [TEST] */
+  /** MEASURED: top edge of the picture, from the window top (same for 100/160/300 px tall pictures). */
+  pictureTop: 67,
+  /** MEASURED: footer button ~150x20 (150 = JAR default width of a notice action). */
+  footerButton: { w: 150, h: 20 },
+  /** MEASURED: the footer button ends ~6 px above the window bottom. */
+  footerButtonBottom: 6,
+  /** MEASURED: title baseline ~16 px below the window top; the title is centred. */
+  titleBaseline: 16,
+  /** Estimate: header area (title + warning button) height; only used for the separator line and scroll clipping. */
   headerHeight: 33,
-  /** Footer (action button) height. [TEST] */
+  /** Estimate: footer area height (the body scrolls above it). */
   footerHeight: 33,
-  /** Space between header and the first body widget. [TEST] */
-  bodyTopPadding: 4,
-  /** Space kept below the body content before the footer. [TEST] */
+  /** Estimate: space kept between the body content and the footer. */
   bodyBottomPadding: 4,
-  /** FocusableTextWidget padding on each side [GW: DEFAULT_PADDING = 4]. */
+  /** FocusableTextWidget padding per side [GW: 4]; the picture starts this far inside the widget. */
   textPadding: 4,
-  /** Height of one text line in the body [GW]. */
+  /** VERIFIED §3: one text line is 9 px. */
   lineHeight: 9,
-  /** Title font size used by the mock (the game uses its 8 px font; CJK glyphs come from unifont). */
+  /** Mock only: title font size (the game uses its 8 px font; CJK glyphs come from unifont). */
   titleFontSize: 10,
   titleColor: '#ffffff',
-  /** Warning icon button next to the title [JAR: exists; size/spacing TEST]. */
+  /** Estimate: warning icon button next to the title [JAR: exists]. */
   warningButtonSize: 20,
   titleWarningGap: 6,
-  /** Footer button of a `notice` dialog [JAR default width 150]. */
-  footerButton: { w: 150, h: 20 },
+  /** Default footer label (projects can change it). */
   footerLabel: '關閉',
-  /** Dim layer over the (blurred) world. */
+  /** Mock only: dim layer over the (blurred) world. */
   dimColor: '#08080ca8',
-  /** Header/footer separator lines (dark then light). */
+  /** Mock only: header/footer separator lines (dark then light). */
   separator: ['#00000066', '#ffffff24'] as const,
-  /** Scrollbar drawn when the body is taller than the window. */
+  /** Mock only: scrollbar drawn when the body is taller than the window. */
   scrollbarWidth: 6,
 };
 
@@ -65,11 +72,15 @@ export interface GameLayout {
   guiH: number;
   header: Rect;
   footer: Rect;
+  /** Scrollable area between header and footer. */
   body: Rect;
   /** Where the page bitmap is drawn (may extend below the body when it needs scrolling). */
   page: Rect;
-  /** Size of the text widget that holds the page. */
+  /** Size of the text widget that holds the page (width = plain_message.width = W + 12). */
   widget: { w: number; h: number };
+  /** Height available for the widget before it needs scrolling. */
+  widgetSpace: number;
+  footerButton: Rect;
   fitsWidth: boolean;
   fitsHeight: boolean;
 }
@@ -85,17 +96,26 @@ export function gameLayout(winW: number, winH: number, scale: number, pageW: num
   const guiW = Math.floor(winW / scale), guiH = Math.floor(winH / scale);
   const header = { x: 0, y: 0, w: guiW, h: C.headerHeight };
   const footer = { x: 0, y: guiH - C.footerHeight, w: guiW, h: C.footerHeight };
-  const body = { x: 0, y: header.h, w: guiW, h: Math.max(0, guiH - header.h - footer.h) };
-  const widget = { w: pageW + 2 * C.textPadding, h: widgetHeight(pageH) };
-  const fitsWidth = widget.w <= guiW;
-  const fitsHeight = widget.h <= body.h - C.bodyTopPadding - C.bodyBottomPadding;
-  const page = {
-    x: Math.floor((guiW - pageW) / 2),
-    y: body.y + C.bodyTopPadding + C.textPadding,
-    w: pageW,
-    h: pageH,
+  const body = { x: 0, y: header.h, w: guiW, h: Math.max(0, footer.y - header.h) };
+  const widget = { w: pageW + WIDGET_PADDING + WIDTH_MARGIN, h: widgetHeight(pageH) };
+  const widgetSpace = Math.max(0, footer.y - C.bodyBottomPadding - (C.pictureTop - C.textPadding));
+  // The picture is centred horizontally and starts at the measured top (it scrolls with the body when too tall).
+  const page = { x: Math.floor((guiW - pageW) / 2), y: C.pictureTop, w: pageW, h: pageH };
+  const fb = C.footerButton;
+  const footerButton = { x: Math.floor((guiW - fb.w) / 2), y: guiH - C.footerButtonBottom - fb.h, w: fb.w, h: fb.h };
+  return {
+    guiW, guiH, header, footer, body, page, widget, widgetSpace, footerButton,
+    fitsWidth: widget.w <= guiW,
+    fitsHeight: widget.h <= widgetSpace,
   };
-  return { guiW, guiH, header, footer, body, page, widget, fitsWidth, fitsHeight };
+}
+
+/** zh-TW fit warning for the checks, or null when the page fits the window at that GUI scale. */
+export function fitProblem(win: WindowPreset, guiScale: number, page: { width: number; height: number }): string | null {
+  const L = gameLayout(win.w, win.h, guiScale, page.width, page.height);
+  if (!L.fitsWidth) return `在 ${win.label}、GUI ${guiScale} 下寬度超出視窗。`;
+  if (!L.fitsHeight) return `在 ${win.label}、GUI ${guiScale} 下高度不足，玩家需要捲動才看得到全部。`;
+  return null;
 }
 
 /** Stylised blocky landscape standing in for the blurred world behind the dialog. */
@@ -162,7 +182,8 @@ export function drawGameMock(ctx: Ctx2D, env: RenderEnv, L: GameLayout, o: MockO
   if (!L.fitsHeight && L.body.h > 8) {
     const sx = L.guiW - C.scrollbarWidth - 2;
     fill(ctx, sx, L.body.y + 2, C.scrollbarWidth, L.body.h - 4, '#00000080');
-    const thumb = Math.max(8, Math.floor(((L.body.h - 4) * L.body.h) / (L.widget.h + C.bodyTopPadding)));
+    const content = C.pictureTop - C.textPadding - L.body.y + L.widget.h + C.bodyBottomPadding;
+    const thumb = Math.max(8, Math.floor(((L.body.h - 4) * L.body.h) / Math.max(content, L.body.h)));
     fill(ctx, sx, L.body.y + 2, C.scrollbarWidth, thumb, '#c0c0c0');
     fill(ctx, sx + C.scrollbarWidth - 1, L.body.y + 2, 1, thumb, '#7f7f7f');
   }
@@ -184,13 +205,13 @@ export function drawGameMock(ctx: Ctx2D, env: RenderEnv, L: GameLayout, o: MockO
   const tw = Math.max(1, Math.min(L.guiW - ws - 20, measureTextWidth(env, title, fs, false, o.fontFamily) + 2));
   const total = tw + C.titleWarningGap + ws;
   const tx = Math.floor((L.guiW - total) / 2);
-  drawText(ctx, env, { x: tx, y: Math.floor((L.header.h - ws) / 2), w: tw, h: ws }, title, { ...tStyle, align: 'right' });
-  warningButton(ctx, tx + tw + C.titleWarningGap, Math.floor((L.header.h - ws) / 2), ws);
+  // centre the title line so that its baseline lands near the measured titleBaseline
+  const ty = Math.max(0, C.titleBaseline - 4 - Math.floor(ws / 2));
+  drawText(ctx, env, { x: tx, y: ty, w: tw, h: ws }, title, { ...tStyle, align: 'right' });
+  warningButton(ctx, tx + tw + C.titleWarningGap, ty, ws);
 
   // footer button
-  const fb = C.footerButton;
-  const bx = Math.floor((L.guiW - fb.w) / 2), by = L.footer.y + Math.floor((L.footer.h - fb.h) / 2);
-  const look = vanillaSkin.drawButton(ctx, { x: bx, y: by, w: fb.w, h: fb.h }, { variant: 'default', fill: null }, { accent: '#4f9a3a' });
+  const look = vanillaSkin.drawButton(ctx, L.footerButton, { variant: 'default', fill: null }, { accent: '#4f9a3a' });
   drawText(ctx, env, look.face, o.footerLabel ?? C.footerLabel, { ...tStyle, align: 'center', color: '#ffffff', shadow: look.shadow });
   ctx.restore();
 }

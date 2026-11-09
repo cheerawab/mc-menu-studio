@@ -81,6 +81,19 @@ describe('Editor UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '套用範本' }));
     expect(editor().project.skinId).toBe('holo');
 
+    // export dialog: mode switch, explanations, checks; jsdom has no 2D canvas, so the build reports an error
+    fireEvent.click(screen.getByRole('button', { name: /匯出/ }));
+    expect(screen.getByRole('dialog', { name: /匯出到 Minecraft/ })).toBeTruthy();
+    expect(screen.getAllByText(/實驗性設定/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('radio', { name: /函數內嵌/ }));
+    expect(screen.getByText('函數內嵌模式無法綁定 G 鍵。')).toBeTruthy();
+    expect(await screen.findByText(/無法匯出/, {}, { timeout: 3000 })).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: '伺服器' }));
+    expect(screen.getByText(/server.properties/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /資料包對話框/ }));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: /匯出到 Minecraft/ })).toBeNull();
+
     expect(errors).not.toHaveBeenCalled();
   });
 });

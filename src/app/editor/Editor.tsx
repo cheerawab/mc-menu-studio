@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { installAppStore } from '../state/persistence';
 import { editor, useEditor } from '../state/store';
 import CanvasView from './CanvasView';
+import ExportDialog from './ExportDialog';
 import { ConfirmDialog, Toasts } from './Overlays';
 import GamePreview from './GamePreview';
 import LeftPanel from './LeftPanel';
@@ -129,6 +130,7 @@ export default function Editor() {
         <RightPanel />
       </div>
       <TemplatesDialog />
+      <ExportDialog />
       <ConfirmDialog />
       <Toasts />
     </div>

@@ -1,5 +1,5 @@
 // Project validation for the 檢查 panel. Messages are user-facing (zh-TW).
-import { ELEMENT_LABELS, isInteractive, PAGE_LIMITS } from './defaults';
+import { DEFAULT_FOOTER_LABEL, ELEMENT_LABELS, isInteractive, PAGE_LIMITS } from './defaults';
 import { KEY_RE } from './ids';
 import type { Action, Element, Id, Page, Project } from './types';
 
@@ -72,6 +72,17 @@ export function validateAction(action: Action, project: Project, ownPageId?: Id)
   }
 }
 
+/**
+ * Rough width of a label in the game's default font (CJK/full-width glyphs ~9 px, others ~6 px). [TEST] estimate,
+ * only used to warn about footer labels that may not fit the 150 px footer button.
+ */
+export function estimateGameTextWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) w += ch.codePointAt(0)! >= 0x2e80 ? 9 : 6;
+  return w;
+}
+export const FOOTER_LABEL_MAX_WIDTH = 140;
+
 function elementLabel(el: Element) {
   return el.name || ELEMENT_LABELS[el.type];
 }
@@ -91,6 +102,12 @@ export function validateProject(project: Project, opts: ValidateOptions = {}): I
     add({ severity: 'warning', code: 'namespace-minecraft', message: '命名空間不建議使用 minecraft，請改成自己的名稱。' });
 
   if (!project.pages.length) add({ severity: 'error', code: 'no-pages', message: '專案至少需要一個頁面。' });
+
+  const footer = project.settings.footerLabel.trim();
+  if (!footer)
+    add({ severity: 'warning', code: 'footer-empty', message: `下方按鈕的預設文字是空的，匯出時會使用「${DEFAULT_FOOTER_LABEL}」。` });
+  else if (estimateGameTextWidth(footer) > FOOTER_LABEL_MAX_WIDTH)
+    add({ severity: 'warning', code: 'footer-long', message: `下方按鈕的預設文字「${footer}」太長，可能超出遊戲按鈕的寬度。` });
 
   const keyCount = new Map<string, number>();
   for (const p of project.pages) keyCount.set(p.key, (keyCount.get(p.key) ?? 0) + 1);
@@ -118,6 +135,8 @@ export function validateProject(project: Project, opts: ValidateOptions = {}): I
       add({ severity: 'error', code: 'page-small', pageId, message: `頁面${where}太小（至少 ${PAGE_LIMITS.minW}×${PAGE_LIMITS.minH}）。` });
     if (index > 0 && !linkedTo.has(page.id))
       add({ severity: 'info', code: 'page-unreachable', pageId, message: `沒有按鈕連到頁面${where}，玩家只能用指令開啟它。` });
+    if (page.footerLabel !== null && estimateGameTextWidth(page.footerLabel.trim()) > FOOTER_LABEL_MAX_WIDTH)
+      add({ severity: 'warning', code: 'footer-long', pageId, message: `頁面${where}的下方按鈕文字「${page.footerLabel.trim()}」太長，可能超出遊戲按鈕的寬度。` });
     const fit = opts.fitCheck?.(page);
     if (fit) add({ severity: 'warning', code: 'page-fit', pageId, message: `頁面${where}：${fit}` });
 

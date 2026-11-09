@@ -2,7 +2,7 @@
 
 import { Copy, ImageUp, Trash, ArrowUp, ArrowDown } from 'lucide-react';
 import { useEffect, useRef, type ReactNode } from 'react';
-import { DEFAULT_FONT_STACK, ELEMENT_LABELS, isInteractive, PAGE_LIMITS } from '@/core/model/defaults';
+import { DEFAULT_FONT_STACK, DEFAULT_FOOTER_LABEL, ELEMENT_LABELS, isInteractive, PAGE_LIMITS } from '@/core/model/defaults';
 import { slugify } from '@/core/model/ids';
 import { assetBytes, removeUnusedAssets, usedAssetIds } from '@/core/model/ops';
 import { ICON_IDS, type Action, type Element, type IconId, type InteractiveElement, type Page } from '@/core/model/types';
@@ -559,12 +559,28 @@ function PageInspector({ page }: { page: Page }) {
           <Field label="背景色（留空 = 透明）" wide>
             <ColorInput ariaLabel="頁面背景色" value={page.bgColor} onChange={(v) => set({ bgColor: v })} />
           </Field>
+          <Field label="下方按鈕文字（此頁）" wide hint="遊戲對話框底部的按鈕。留空 = 使用專案預設。">
+            <TextInput
+              ariaLabel="此頁的下方按鈕文字"
+              value={page.footerLabel ?? ''}
+              placeholder={project.settings.footerLabel || DEFAULT_FOOTER_LABEL}
+              onChange={(v) => set({ footerLabel: v.trim() ? v : null })}
+            />
+          </Field>
         </div>
       </Section>
       <Section title="專案">
         <div className="flex flex-col gap-2.5">
           <Field label="命名空間" hint="資料包與資源包使用的名稱，只能用小寫英文、數字與底線。">
             <TextInput ariaLabel="命名空間" mono value={project.namespace} onChange={(v) => setProject((p) => ({ ...p, namespace: v.toLowerCase().replace(/[^a-z0-9_]/g, '_') }), 'namespace')} />
+          </Field>
+          <Field label="下方按鈕文字（預設）" hint="每個頁面底部那顆遊戲按鈕的文字，可在各頁覆寫。">
+            <TextInput
+              ariaLabel="下方按鈕文字預設值"
+              value={project.settings.footerLabel}
+              placeholder={DEFAULT_FOOTER_LABEL}
+              onChange={(v) => setProject((p) => ({ ...p, settings: { ...p.settings, footerLabel: v } }), 'footer-label')}
+            />
           </Field>
           <Field label="外觀主題">
             <SkinPicker />

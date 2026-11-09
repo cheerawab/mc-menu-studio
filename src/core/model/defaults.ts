@@ -21,6 +21,9 @@ export const PAGE_LIMITS = {
 
 export const DEFAULT_FONT_STACK = '"PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Heiti TC", sans-serif';
 
+/** Default label of the dialog's footer button. */
+export const DEFAULT_FOOTER_LABEL = '關閉';
+
 export const SKIN_IDS: readonly SkinId[] = ['vanilla', 'dark', 'holo', 'parchment'];
 
 export const ELEMENT_TYPES: readonly ElementType[] = [
@@ -53,7 +56,7 @@ export function isInteractive(el: Element): el is InteractiveElement {
 export const NO_ACTION: Action = { type: 'none' };
 
 export function defaultSettings(): ProjectSettings {
-  return { fontFamily: DEFAULT_FONT_STACK, accent: null };
+  return { fontFamily: DEFAULT_FONT_STACK, accent: null, footerLabel: DEFAULT_FOOTER_LABEL };
 }
 
 type ElementOf<T extends ElementType> = Extract<Element, { type: T }>;
@@ -166,9 +169,15 @@ export function createPage(props: Partial<Page> = {}): Page {
     width: PAGE_LIMITS.defaultW,
     height: PAGE_LIMITS.defaultH,
     bgColor: null,
+    footerLabel: null,
     elements: [],
     ...props,
   };
+}
+
+/** Footer button label used for a page: its override, else the project default, else "關閉". */
+export function effectiveFooterLabel(page: Page, project: Project): string {
+  return (page.footerLabel ?? project.settings.footerLabel).replace(/\s+/g, ' ').trim() || DEFAULT_FOOTER_LABEL;
 }
 
 export function createProject(props: Partial<Project> = {}): Project {
