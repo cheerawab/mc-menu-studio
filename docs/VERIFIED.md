@@ -65,3 +65,30 @@ Resource pack selected via options.txt `resourcePacks:["vanilla","file/<zip name
 ## 8. Chrome metrics for the in-game mock preview (measured, GUI scale 3, 1280x720 window = 853x480 MC px)
 picture top y = 67 MC px; picture horizontally centred; footer button ~ (150x20) ending ~6 px above the bottom edge;
 title baseline ~16 px from the top. Keep these in one constants object; they will be refined later.
+
+## 9. Drop shadow (VERIFIED in game + DECOMPILED)
+Vanilla draws a drop shadow behind these glyphs: screenshots show a 1 MC-px band of RGB(63,63,63) (= 25% of white) on the
+right and bottom edges of every picture. **Every run must carry `"shadow_color": 0`** (transparent). DECOMPILED:
+`Font.PreparedTextBuilder.getShadowColor` returns the style value when present, and the shadow is only drawn when it is != 0.
+`shadow_color: 0` has NOT been seen in game yet (Hermes will check when the exporter exists), but it is the documented
+mechanism. A shadow also makes the click box 1 px larger on the right/bottom (see 10).
+
+## 10. Click hit-testing algorithm (DECOMPILED from 26.3 jar; NOT yet clicked in game)
+`ActiveTextCollector.ClickableStyleFinder.accept` -> `findElementUnderCursor`: if the mouse is inside the union of all glyph
+quads of the line (`PreparedText.bounds`, so the whole picture area, not just the 9 px line band), the client visits every
+glyph AND every "empty area" (space glyphs) and each one whose active rectangle contains the point and whose style has a
+click_event OVERWRITES the result => **the last glyph in text order that contains the point wins** (z-order = text order).
+Active rectangle of a bitmap glyph = its drawn quad: x from the cursor to cursor + FULL CELL WIDTH (not the trimmed advance),
+y from `line_y + (7 - ascent)` to `+ cell height`; +1 px right/bottom only if a shadow is drawn. Hence: a hit glyph whose cell is
+exactly region w x h (every pixel alpha = 1/255, so `getActualGlyphWidth` is full width and the shader discards the pixels)
+gives exactly that rectangle. Hit glyph runs must come after everything else they overlap. Space glyphs carrying a click
+style are clickable over their POSITIVE advance only (and only in the first line's 9 px band): never put click/hover events
+on space runs; put them on the glyph run only (spaces in separate runs).
+Hover tooltips use the same walk (hover_event). Mouse hit test happens in GUI coordinates of the widget; scrolling the body
+moves the pose, hit-test follows.
+
+## 11. Bitmap provider facts (DECOMPILED)
+`pixelScale = height / cellHeight` (height = provider `height` field). Keep `height == cell height` so
+`advance = (int)(0.5 + actualWidth) + 1 = actualWidth + 1`. `ascent <= height` (error otherwise). The `chars` grid must be
+rectangular; pad with `\u0000`; cell = png size / grid. `getActualGlyphWidth` scans columns right to left for any pixel with
+non-zero alpha (luminance-or-alpha != 0). Declaring a codepoint twice only logs a warning (last wins).

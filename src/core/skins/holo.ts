@@ -25,9 +25,9 @@ function brackets(ctx: Ctx2D, x: number, y: number, w: number, h: number, corner
 
 /** Glowing outline: faint outer ring, bright line, faint inner ring. */
 function glowFrame(ctx: Ctx2D, x: number, y: number, w: number, h: number, c: number, color: string, strength = 1) {
-  strokeShape(ctx, x, y, w, h, chamfer(c), withAlpha(color, 0.26 * strength));
+  strokeShape(ctx, x, y, w, h, chamfer(c), withAlpha(color, Math.max(0.1, 0.26 * strength)));
   strokeShape(ctx, x + 1, y + 1, w - 2, h - 2, chamfer(c - 1), withAlpha(color, 0.92 * strength));
-  strokeShape(ctx, x + 2, y + 2, w - 4, h - 4, chamfer(c - 2), withAlpha(color, 0.16 * strength));
+  strokeShape(ctx, x + 2, y + 2, w - 4, h - 4, chamfer(c - 2), withAlpha(color, Math.max(0.1, 0.16 * strength)));
 }
 
 export const holoSkin: Skin = {
@@ -55,7 +55,7 @@ export const holoSkin: Skin = {
     const spans = rowSpans(w - 4, h - 4, chamfer(c - 2));
     for (let j = 1; j < spans.length; j += 3) {
       const s = spans[j];
-      if (s) fill(ctx, x + 2 + s[0], y + 2 + j, s[1] - s[0], 1, withAlpha(a, 0.06));
+      if (s) fill(ctx, x + 2 + s[0], y + 2 + j, s[1] - s[0], 1, withAlpha(a, 0.1));
     }
     glowFrame(ctx, x, y, w, h, c, a);
     const len = Math.max(3, Math.min(10, Math.floor(Math.min(w, h) / 5)));
@@ -77,7 +77,7 @@ export const holoSkin: Skin = {
     const disabled = o.variant === 'disabled';
     const base = o.fill ?? accent;
     gradientShape(ctx, x + 1, y + 1, w - 2, h - 2, chamfer(c - 1),
-      withAlpha(base, disabled ? 0.06 : 0.26), withAlpha(base, disabled ? 0.03 : 0.1), 'vertical');
+      withAlpha(base, disabled ? 0.12 : 0.26), withAlpha(base, disabled ? 0.1 : 0.12), 'vertical');
     glowFrame(ctx, x, y, w, h, c, base, disabled ? 0.35 : 1);
     if (!disabled) brackets(ctx, inner.x, inner.y, inner.w, inner.h, chamfer(c - 1), 3, lighten(base, 0.7));
     return {

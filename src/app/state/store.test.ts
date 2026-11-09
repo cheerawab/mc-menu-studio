@@ -135,3 +135,22 @@ describe('persistence', () => {
     expect(store.getState().toasts.some((t) => t.kind === 'error')).toBe(true);
   });
 });
+
+describe('autosave after gestures', () => {
+  it('saves the final position of a drag', async () => {
+    const m = new Map<string, string>();
+    const storage = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } as unknown as Storage;
+    const store = createEditorStore(createProject({ pages: [createPage({ key: 'main' })] }));
+    const el = createElement('panel', { x: 0 });
+    store.getState().addElement(el);
+    const stop = startAutosave(store, storage, 1);
+    store.getState().beginGesture();
+    store.getState().updateGesture((b) => updateElements(b, store.getState().pageId, [el.id], { x: 77 }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(m.get(PROJECT_KEY) ?? '').not.toContain('"x":77');
+    store.getState().endGesture();
+    await new Promise((r) => setTimeout(r, 20));
+    stop();
+    expect(m.get(PROJECT_KEY)).toContain('"x":77');
+  });
+});

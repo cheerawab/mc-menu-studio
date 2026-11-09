@@ -48,6 +48,15 @@ describe('Editor UI', () => {
     fireEvent.keyDown(window, { key: 'Delete' });
     expect(editor().project.pages[0].elements.length).toBe(before);
 
+    // every element type renders its inspector
+    for (const label of ['面板', '文字', '圖片', '圖示', '形狀', '進度條', '分隔線', '物品格']) {
+      fireEvent.click(screen.getByTitle(new RegExp(`^${label}：`)));
+      expect(screen.getByRole('textbox', { name: '元件名稱' })).toBeTruthy();
+    }
+    fireEvent.keyDown(window, { key: 'a', metaKey: true });
+    expect(screen.getByText(/已選取 \d+ 個元件/)).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+
     // tabs
     fireEvent.click(screen.getByRole('tab', { name: /檢查/ }));
     expect(screen.getByText('靜態匯出的限制')).toBeTruthy();

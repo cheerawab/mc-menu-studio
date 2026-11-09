@@ -24,6 +24,9 @@ function useSetter(el: Element) {
 
 const grid2 = 'grid grid-cols-2 gap-x-2 gap-y-2.5';
 
+/** Last "focus the text field" request that was served (survives inspector remounts). */
+let handledFocusNonce = 0;
+
 /* ------------------------------------------------------------------ action */
 
 const ACTION_OPTIONS: { value: Action['type']; label: string }[] = [
@@ -255,9 +258,9 @@ function TypeFields({ el }: { el: Element }) {
   const nonce = useEditor((s) => s.focusTextNonce);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = useRef<HTMLDivElement>(null);
-  const firstNonce = useRef(nonce);
   useEffect(() => {
-    if (nonce === firstNonce.current) return;
+    if (nonce <= handledFocusNonce) return;
+    handledFocusNonce = nonce;
     const t = textRef.current ?? inputRef.current?.querySelector('input');
     t?.focus();
     t?.select();

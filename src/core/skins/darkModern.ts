@@ -43,7 +43,7 @@ export const darkModernSkin: Skin = {
     }
     fillShape(ctx, x, y, w, h - sh, round(6), o.border ?? BORDER);
     fillShape(ctx, x + 1, y + 1, w - 2, h - sh - 2, round(5), base);
-    topHighlight(ctx, x + 1, y + 1, w - 2, h - sh - 2, 5, withAlpha(lighten(base, 0.6), 0.1));
+    topHighlight(ctx, x + 1, y + 1, w - 2, h - sh - 2, 5, withAlpha(lighten(base, 0.6), 0.12));
   },
 
   drawButton(ctx, { x, y, w, h }, o, k) {
@@ -66,7 +66,7 @@ export const darkModernSkin: Skin = {
     fillShape(ctx, x, y, w, h - 1, round(r), border);
     if (o.variant === 'disabled') fillShape(ctx, x + 1, y + 1, w - 2, h - 3, round(r - 1), base);
     else gradientShape(ctx, x + 1, y + 1, w - 2, h - 3, round(r - 1), lighten(base, 0.07), darken(base, 0.04), 'vertical');
-    topHighlight(ctx, x + 1, y + 1, w - 2, h - 3, r - 1, withAlpha('#ffffff', o.variant === 'disabled' ? 0.03 : 0.14));
+    if (o.variant !== 'disabled') topHighlight(ctx, x + 1, y + 1, w - 2, h - 3, r - 1, withAlpha('#ffffff', 0.14));
     return { text, shadow: null, face: { x: x + 1, y: y + 1, w: w - 2, h: h - 3 } };
   },
 

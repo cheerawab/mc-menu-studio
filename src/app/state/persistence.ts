@@ -70,13 +70,18 @@ export function startAutosave(store: EditorStore, storage: Storage | null = safe
   if (!storage) return () => {};
   let timer: ReturnType<typeof setTimeout> | null = null;
   let failed = false;
+  const viewKey = (v: ViewState) => JSON.stringify({ showGrid: v.showGrid, snap: v.snap, showRegions: v.showRegions, guiScale: v.guiScale, windowId: v.windowId });
+  let savedProject = store.getState().project;
+  let savedView = viewKey(store.getState().view);
   const flush = () => {
     timer = null;
     const s = store.getState();
     try {
-      storage.setItem(PROJECT_KEY, serializeProject(s.project, false));
-      const { showGrid, snap, showRegions, guiScale, windowId } = s.view;
-      storage.setItem(VIEW_KEY, JSON.stringify({ showGrid, snap, showRegions, guiScale, windowId }));
+      const vk = viewKey(s.view);
+      if (s.project !== savedProject) storage.setItem(PROJECT_KEY, serializeProject(s.project, false));
+      if (vk !== savedView) storage.setItem(VIEW_KEY, vk);
+      savedProject = s.project;
+      savedView = vk;
       if (failed) s.toast('success', '自動儲存已恢復。');
       failed = false;
     } catch {
@@ -84,9 +89,11 @@ export function startAutosave(store: EditorStore, storage: Storage | null = safe
       failed = true;
     }
   };
-  const unsub = store.subscribe((s, prev) => {
-    if (s.project === prev.project && s.view === prev.view) return;
+  // Compare against what was last written (not the previous state), so the end of a drag gesture,
+  // which does not change `project` itself, still gets saved.
+  const unsub = store.subscribe((s) => {
     if (s.gestureBase) return; // save once the drag ends
+    if (s.project === savedProject && viewKey(s.view) === savedView) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(flush, delay);
   });
