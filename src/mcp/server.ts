@@ -1,7 +1,6 @@
 // Wires every mcms.* tool onto an McpServer. Each tool is a thin zod-validated wrapper over a handler in
 // src/mcp/handlers/*.ts, which in turn only calls src/core functions. No render/export/validate logic lives here.
-// Stage 4: groups E (checks) and F (previews, "the agent's eyes") join A-D. G (export) follows in the next stage
-// (MCP_PLAN.md §2.3/§8).
+// Stage 5: group G (export) completes the tool set (A-G, MCP_PLAN.md §2.3/§8).
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { getPage } from '../core/model/ops';
@@ -12,6 +11,7 @@ import {
   removeElementHandler, updateElementHandler,
 } from './handlers/element';
 import { createRenderEnv } from './env';
+import { buildProjectExport, writeProjectExport } from './handlers/export';
 import { elementTypesInfo, iconsInfo, skinsInfo } from './handlers/introspect';
 import {
   addPageHandler, duplicatePageHandler, movePageHandler, pageNotFoundMessage, removePageHandler, updatePageHandler,
@@ -20,8 +20,8 @@ import { defaultPreviewPath, renderGameMockPreview, renderPagePreview, toBase64,
 import { createProjectHandle, getProjectHandle, listTemplates, openProjectHandle, saveProjectHandle } from './handlers/project';
 import { imageResult, jsonResult } from './result';
 import {
-  checkOptionsShape, elementPropsSchema, elementTypeSchema, handleSchema, idSchema, idsSchema, pagePropsSchema,
-  renderScaleSchema, skinIdSchema,
+  checkOptionsShape, elementPropsSchema, elementTypeSchema, exportOptionsShape, handleSchema, idSchema, idsSchema,
+  pagePropsSchema, renderScaleSchema, skinIdSchema,
 } from './schemas';
 import { ProjectStore } from './state';
 
@@ -212,6 +212,28 @@ export function createServer(store: ProjectStore = new ProjectStore(), env: Rend
       if (inline) return imageResult(toBase64(out.png), 'image/png', meta);
       const path = writePng(outPath ?? defaultPreviewPath(store.path(handle), page.key, '.mock.png'), out.png);
       return jsonResult({ path, ...meta });
+    },
+  );
+
+  // G. export ---------------------------------------------------------------------------------------------------
+  server.tool(
+    'mcms.export.build',
+    '在記憶體裡建置匯出結果（不寫檔），回傳統計數字與警告，讓 agent 先檢查再決定是否真的匯出。',
+    { handle: handleSchema, options: z.object(exportOptionsShape).partial().optional() },
+    async ({ handle, options }) => {
+      const build = buildProjectExport(store.get(handle), env, options ?? {});
+      return jsonResult({ stats: build.stats, warnings: build.warnings });
+    },
+  );
+
+  server.tool(
+    'mcms.export.write',
+    '匯出 resourcepack.zip / datapack.zip / README_zh-TW.txt（+ 可選 autotest.zip）到指定資料夾。',
+    { handle: handleSchema, options: z.object(exportOptionsShape).partial().optional(), outDir: z.string().min(1) },
+    async ({ handle, options, outDir }) => {
+      const build = buildProjectExport(store.get(handle), env, options ?? {});
+      const files = await writeProjectExport(build, outDir);
+      return jsonResult({ files, stats: build.stats, warnings: build.warnings });
     },
   );
 
