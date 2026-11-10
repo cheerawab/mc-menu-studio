@@ -10,10 +10,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "demo:export": "tsx scripts/demo-export.ts",
-    "preview:skins": "tsx scripts/render-previews.ts"
+    "preview:skins": "tsx scripts/render-previews.ts",
+    "mcp": "tsx scripts/mcp-server.ts",
+    "mcp:smoke": "tsx scripts/mcp-smoke.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@napi-rs/canvas": "^1.1.0",
     "fflate": "^0.8.3",
     "jszip": "^3.10.2",
     "lucide-react": "^1.70.0",
@@ -24,7 +27,6 @@
     "zustand": "^5.1.0"
   },
   "devDependencies": {
-    "@napi-rs/canvas": "^1.1.0",
     "@tailwindcss/turbopack": "^4",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
