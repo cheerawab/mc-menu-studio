@@ -149,3 +149,20 @@ level), re-enables the objective every tick. This is the planned "trigger mode".
 - STILL NOT TESTED (needs the user's approval for computer_use input, or a person at the keyboard): real mouse clicks (hit boxes,
   `after_action: close` after a click, footer button, Esc), hover tooltips, no-confirm-screen for `/trigger` clicks, G key,
   registry mode in singleplayer (needs a click on the experimental-settings screen) and on a server, other GUI scales/window sizes.
+
+## 15. SAO-STYLE PROOF OF CONCEPT + FIRST HOVER OBSERVATION (Hermes, real 26.3 client, singleplayer, functions + trigger mode)
+`scripts/sao-poc.ts` (`npx tsx scripts/sao-poc.ts`, not part of the editor) draws two 340x210 pages with plain canvas vector code
+(silver circle icon column, orange selection + pointer notch, translucent panel at 93% alpha, gradients, anti-aliased CJK text),
+hands them to the real exporter (`buildExport`, functions mode, trigger commands, autotest) and writes `exports/sao-poc/`.
+Screenshots: `exports/screenshots/7-sao-items-ingame.png`, `8-sao-status-ingame.png`.
+- VERIFIED: both pages render cleanly: translucent panel lets the blurred world through, anti-aliased edges, CJK text, 119 unique tiles,
+  no visible seams or wrapped rows. Vanilla chrome is unchanged: title + warning button at the top centre, the footer button ("登出")
+  at the bottom, blurred world behind. Nothing of that can be removed by the picture.
+- VERIFIED (first hover seen): the OS cursor parked at the window centre was over region "體力 VIT 20" of `sao_status`; the screenshot
+  shows the vanilla tooltip with exactly that text next to the cursor. So `hover_event` on a hit glyph works. Clicks are still NOT TESTED.
+  Tip: a parked cursor is a free hover test, put a tooltip region under the window centre.
+- VERIFIED: autotest trigger chain again: `TRIGGER time_day id 3` + `CHECK OK`, `weather_clear id 4`, `nav_sao_status id 1`, no errors.
+- Design limits that stay (inference from how Dialog works, except where marked): a Dialog is a modal screen, so it cannot be a HUD
+  (health bar, party list, mob cursors) and cannot replace the pause menu (a dialog can only add a button to it via the
+  `#minecraft:pause_screen_additions` tag, minecraft.wiki Game_Menu). Picture position is fixed (centred), static pictures only in this
+  exporter. See `docs/LANDSCAPE.md` for what other tools claim (motion, HD, typing in a drawn box): NOT verified by Hermes.
