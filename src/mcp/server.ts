@@ -1,25 +1,42 @@
 // Wires every mcms.* tool onto an McpServer. Each tool is a thin zod-validated wrapper over a handler in
 // src/mcp/handlers/*.ts, which in turn only calls src/core functions. No render/export/validate logic lives here.
-// Stage 3: groups B (pages), C (elements) and D (introspection) join group A. E-G (checks, previews, export)
-// follow in the next stages (MCP_PLAN.md §2.3/§8).
+// Stage 4: groups E (checks) and F (previews, "the agent's eyes") join A-D. G (export) follows in the next stage
+// (MCP_PLAN.md §2.3/§8).
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { getPage } from '../core/model/ops';
+import type { RenderEnv } from '../core/render/types';
+import { checkProjectHandler } from './handlers/check';
 import {
   addElementHandler, alignElementsHandler, distributeElementsHandler, duplicateElementHandler, moveElementZHandler,
   removeElementHandler, updateElementHandler,
 } from './handlers/element';
+import { createRenderEnv } from './env';
 import { elementTypesInfo, iconsInfo, skinsInfo } from './handlers/introspect';
-import { addPageHandler, duplicatePageHandler, movePageHandler, removePageHandler, updatePageHandler } from './handlers/page';
+import {
+  addPageHandler, duplicatePageHandler, movePageHandler, pageNotFoundMessage, removePageHandler, updatePageHandler,
+} from './handlers/page';
+import { defaultPreviewPath, renderGameMockPreview, renderPagePreview, toBase64, writePng } from './handlers/preview';
 import { createProjectHandle, getProjectHandle, listTemplates, openProjectHandle, saveProjectHandle } from './handlers/project';
-import { jsonResult } from './result';
-import { elementPropsSchema, elementTypeSchema, handleSchema, idSchema, idsSchema, pagePropsSchema, skinIdSchema } from './schemas';
+import { imageResult, jsonResult } from './result';
+import {
+  checkOptionsShape, elementPropsSchema, elementTypeSchema, handleSchema, idSchema, idsSchema, pagePropsSchema,
+  renderScaleSchema, skinIdSchema,
+} from './schemas';
 import { ProjectStore } from './state';
 
 const alignModeSchema = z.enum(['left', 'hcenter', 'right', 'top', 'vmiddle', 'bottom']);
 const zMoveSchema = z.enum(['up', 'down', 'top', 'bottom']);
 const axisSchema = z.enum(['h', 'v']);
+const guiScaleSchema = renderScaleSchema;
 
-export function createServer(store: ProjectStore = new ProjectStore()): McpServer {
+function requirePageOf(store: ProjectStore, handle: string, pageId: string) {
+  const page = getPage(store.get(handle), pageId);
+  if (!page) throw new Error(pageNotFoundMessage(pageId));
+  return page;
+}
+
+export function createServer(store: ProjectStore = new ProjectStore(), env: RenderEnv = createRenderEnv()): McpServer {
   const server = new McpServer({ name: 'mc-menu-studio', version: '0.1.0' });
 
   // A. project lifecycle ---------------------------------------------------------------------------------------
@@ -152,6 +169,51 @@ export function createServer(store: ProjectStore = new ProjectStore()): McpServe
   server.tool('mcms.schema.element_types', '列出每種元件類型的欄位與預設值。', {}, async () => jsonResult(elementTypesInfo()));
   server.tool('mcms.schema.icons', '列出所有內建圖示 id 與中文標籤。', {}, async () => jsonResult(iconsInfo()));
   server.tool('mcms.schema.skins', '列出所有內建美術風格（skin）。', {}, async () => jsonResult(skinsInfo()));
+
+  // E. checks -------------------------------------------------------------------------------------------------
+  server.tool(
+    'mcms.check.project',
+    '執行專案檢查（含匯出前檢查），error 等級的問題會擋下匯出。',
+    { handle: handleSchema, ...checkOptionsShape },
+    async ({ handle, mode, commandMode }) => jsonResult(checkProjectHandler(store.get(handle), { mode, commandMode })),
+  );
+
+  // F. previews -------------------------------------------------------------------------------------------------
+  server.tool(
+    'mcms.preview.page',
+    '把一頁渲染成 PNG（和編輯器畫面一致）。預設寫檔回路徑；inline=true 時改回傳 base64 圖片。',
+    {
+      handle: handleSchema, pageId: idSchema, scale: renderScaleSchema.optional(), inline: z.boolean().optional(),
+      outPath: z.string().optional(),
+    },
+    async ({ handle, pageId, scale, inline, outPath }) => {
+      const project = store.get(handle);
+      const page = requirePageOf(store, handle, pageId);
+      const out = renderPagePreview(project, page, env, scale);
+      if (inline) return imageResult(toBase64(out.png), 'image/png', { width: out.width, height: out.height });
+      const path = writePng(outPath ?? defaultPreviewPath(store.path(handle), page.key, '.png'), out.png);
+      return jsonResult({ path, width: out.width, height: out.height });
+    },
+  );
+
+  server.tool(
+    'mcms.preview.game_mock',
+    '把一頁渲染成遊戲 Dialog 畫面的模擬截圖（含是否放得下的判定）。預設寫檔回路徑；inline=true 時改回傳 base64 圖片。',
+    {
+      handle: handleSchema, pageId: idSchema, winW: z.number().int().positive(), winH: z.number().int().positive(),
+      guiScale: guiScaleSchema, inline: z.boolean().optional(), outPath: z.string().optional(),
+    },
+    async ({ handle, pageId, winW, winH, guiScale, inline, outPath }) => {
+      const project = store.get(handle);
+      const page = requirePageOf(store, handle, pageId);
+      const win = { id: 'custom', label: `${winW}x${winH}`, w: winW, h: winH };
+      const out = renderGameMockPreview(project, page, env, win, guiScale);
+      const meta = { width: out.width, height: out.height, fits: out.fits, fitsWidth: out.fitsWidth, fitsHeight: out.fitsHeight, warning: out.warning };
+      if (inline) return imageResult(toBase64(out.png), 'image/png', meta);
+      const path = writePng(outPath ?? defaultPreviewPath(store.path(handle), page.key, '.mock.png'), out.png);
+      return jsonResult({ path, ...meta });
+    },
+  );
 
   return server;
 }
