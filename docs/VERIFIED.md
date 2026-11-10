@@ -192,3 +192,31 @@ Material is ready: `exports/size-poc/s270` (fit180 336x180, over189 336x189, sao
 `MinecraftWinWidth=960`, `MinecraftWinHeight=540` in the Prism instance.cfg and `guiScale:0` in options.txt, install the s270 packs, run the
 autotest + `shot_loop.py`, restore both files. Expected if the code reading is right: fit180 has its top frame line at about y = 44 (not 67),
 over189 and sao_items show a scrollbar with the footer button still visible, wide520 is cropped at both sides.
+
+## 17. LARGEST PAGE AT GUI 853x480 (real game: window 1280x720 pt, GUI scale 3) AND WHY SAME-SIZE PAGES DIFFER
+`scripts/max-poc.ts` (set `m853`), screenshots `exports/screenshots/11..14`. Scale 1.8363 screenshot px per GUI px.
+VERIFIED in the real game:
+- SAO page 821x396 (the 340x210 design at k = 396/210): complete down to the bottom row, NO scrollbar. It spans x 16..837 of 853
+  (96.2% of the width) and y 38..434 of 480 (82.5% of the height). The frame page of the same size measures 1507 x 726 screenshot px
+  = 820.7 x 395.4 GUI px. Title and warning button stay at the top, the footer button at the bottom; nothing can be drawn over them
+  (scissor of the scroll container) and the left/right margin is 16 px (10 scrollbar reserve + 6 widget padding).
+- Frame page 821x396 (same size): complete picture but WITH a scrollbar; frame page 821x405: scrollbar, shorter thumb. Thumb sizes give
+  content heights of about 422 and 431 GUI px (= 46 and 47 lines of 9 px + 8), one line more than `1 + ceil(H/9)` predicts for both.
+- Page 1012 px wide in an 853 px GUI: starts at the same 16 px left margin and is cropped on the RIGHT only (not centred), no garbling,
+  tooltip still works.
+- Hover from the parked cursor works again (tooltips "麵包 ×12", "821x396（頁面中央）").
+EXPLANATION (DECOMPILED + offline simulation of the text splitter over the exported function files reproduces 45 / 45 / 46 lines):
+- `FocusableTextWidget.updateHeight()` counts lines with `font.split(message, super.getWidth())`, and `MultiLineTextWidget.getWidth()` is the
+  width of the WIDEST LINE (= W, the final cursor of our first line), not the widget's max width. Rendering still wraps at W + 4 (width - 8).
+- Our first line's running advance peaks at W + 1 whenever a row ends with a tile whose right-most column is opaque (picture touches its
+  right edge, e.g. a frame). The height pass then wraps that line once => one extra empty line (9 px) in the widget height. Nothing visible
+  changes. The SAO page keeps its right margin transparent (peak = W) so it has no extra line.
+- So lines = 1 + ceil(H/9) + (peak > W ? 1 : 0); no scroll iff 8 + 9 * lines <= S - 66 (container max height).
+  S = 480: H <= 396 when the right edge is transparent, H <= 387 when it is not (measured: 396 clean for SAO; 396 scrolls for the frame; 405 scrolls).
+- Fix candidates for the exporter (NOT done): end the first line with a few extra pixels of space so that W_line >= peak (re-centre by the
+  same amount), and emit ceil(H/9) - 1 newlines instead of ceil(H/9) (the picture needs ceil(H/9) lines in total). Together +18 px of height.
+- The editor's mock (`chrome.ts`: `widgetSpace` = S - 100) is wrong in both directions: use container max = S - 66, y = min(63, S - 33 - h).
+OFFLINE CODEC CHECK (Mojang's own Dialog codec via DialogCheck): `plain_message.width` must be within [1;1024] (1024 ok, 1025 fails), so the
+widest possible picture is 1024 - 12 = 1012 px.
+NOT RUN: GUI scale 2 (GUI 1280x720, predicted largest 1012 x 630 / 621 when touching the right edge) and the "frame page first" order test.
+The second launch of this session was held back by the approval prompt (no answer after 5 minutes) and was not retried.
