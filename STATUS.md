@@ -83,21 +83,50 @@ fit / double tap eased; pointer-down and wheel stop an animation; reduced motion
 desktop; smooth scaling below 100 %; ctrl + wheel continuous and settles; wheel notch; Shift + wheel pans).
 `mediaMock.ts` understands `(prefers-reduced-motion: reduce)`.
 
-### Stage G: not verified — what Hermes should measure
+### Stage G: checked in Chrome with device emulation (Hermes, 2026-11-10)
 
-Nothing here ran in a real browser or on a phone (rule); jsdom has no layout (0×0 stage) and fake rAF / timers.
-Sample `document.querySelector('[data-stage] canvas').getBoundingClientRect().width` (or its `style.width`) every
-animation frame, page "lobby" (340 px wide):
-- Pinch 80 → 240 px over 40 moves from 100 %: a new width on (nearly) every frame from 340 to 1020, no plateaus; 300 % is
-  reached exactly, so no settle afterwards. Pinch ending at about 2.9x: eases to 1020 within about 120 ms of lifting.
-- ctrl + wheel, 60 events of deltaY −4 from 200 %: width grows every frame up to 2720 (800 %; 2·e^2.4 ≈ 22 is clamped).
-- Pinch far past 800 %: width stays below 2992 (8.8 × 340) while the fingers are down, back to 2720 after release.
-- Buttons / keys: about 11 frames per step (180 ms) ending exactly on 510 / 680 / 1020 …; 符合視窗, 0 and double tap
-  about 14 frames (220 ms). With `prefers-reduced-motion: reduce` emulated: one-frame jumps.
-- Frame gaps while pinching on a 4x throttled CPU (the canvas column now re-renders on every frame of a zoom).
-- By eye: crisp pixels at 100 / 200 / 300 %, uneven pixel widths at fractional zooms (expected with nearest-neighbour),
-  smooth scaling below 100 % on a 1x screen, rulers at 25 / 33 / 67 / 150 %, grid lines at fractional zooms, a page
-  wider than the phone (480×270) fitting at about 72 %.
+Chrome emulation plus CDP touch / wheel events against `npm run dev`, sampling the page canvas' on-screen width on every
+animation frame. Not a real phone, trackpad or Safari.
+
+Before Stage G (page "lobby", 340 wide, 390×844 @3x): a pinch from 80 to 240 px apart produced 3 widths in total
+(340 / 680 / 1020), a 60-event ctrl+wheel moved in whole-number steps only, buttons / keys / fit jumped in one frame.
+The frame rate was never the problem (median 16.7 ms, p95 16.8, max 33 even at 4x CPU throttle).
+
+After (page 480×270, which fits at 72 % on the phone):
+- Pinch 80 → 240 px in 40 moves: 41 distinct widths (346 → 1038 px), largest step 5 % per frame, no reversals. Frame gaps
+  median 16.7 / p95 16.8 / max 39 ms, and 16.7 / 16.7 / 33 ms at 4x CPU throttle.
+- Pinch endings: ×2.4 (173 %) stays; a target of 196 % settles to exactly 200 % in about 4 frames; 104 % settles to 100 %;
+  130 % stays; far past the limit the width peaks at 856 % while the fingers are down and returns to 800 % in about 6
+  frames; far below the minimum it dips to 23 % and returns to 25 %.
+- Buttons: 72 → 100 → 150 → 200 % and back, 12–13 distinct widths per step ending exactly on the stop; fit from 400 % takes
+  15 frames; + is disabled at 800 %, − at 25 %. Keys `=` / `-` on desktop: 170–183 ms.
+- `prefers-reduced-motion: reduce` (emulated): every button / fit step is a single frame.
+- A pointer-down during a + animation stops it where it is (a touch at +116 ms stopped at 499 px instead of 510); no jump.
+- Desktop ctrl+wheel: 12 events of deltaY −2 → ×1.27 (= e^0.24), 72 distinct widths, largest step 0.7 %, no reversals;
+  60 events → ×3.32. One mouse notch → ×1.2, eased over about 25 frames; three notches → ×1.728.
+- The page point under the cursor (ctrl+wheel in and out, three cursor positions) or under the pinch midpoint (zoom only,
+  zoom plus midpoint drag, pure two-finger pan) moves by at most 0.05 page px.
+- At zoom 1.5 and 1.75: a tap selects the right element, a one-finger drag of 36×24 screen px moves it by exactly 24×16
+  page px, dragging a handle by 30×15 resizes by 20×10, undo restores.
+- 480×270 on a 390 px wide phone: fit gives 72 % with 12 px margins, − goes 67 / 50 / 33 %. The canvas stays `pixelated`
+  at 72 % on the 3x screen (zoom × devicePixelRatio ≥ 1, as designed).
+- Idle: 0 requestAnimationFrame calls from the app, also 1.5 s after a zoom settled. No console errors or warnings, and none
+  in the dev-server log.
+
+Observed, not investigated:
+- Desktop layout at 4x CPU throttle, 50 ctrl+wheel events: frame gaps median 33 ms, p95 50 ms. In 2 of 3 throttled runs the
+  zoom dipped by about 1 % mid-gesture (2.091 → 2.060 → 2.077) while the events arrived up to 563 ms apart; not seen
+  unthrottled. Probable cause (inferred, not tested): a gap above the 150 ms wheel-idle timer starts the settle towards 200 %
+  before the next event arrives.
+- On a 1x-DPR screen, 150 % with nearest-neighbour scaling shows visibly uneven 1 / 2 px strokes (one frame, enlarged 4x);
+  on 2x / 3x screens the unevenness is much smaller. Smooth scaling while the zoom is moving and crisp at rest would avoid
+  it; not tried.
+
+### Stage G: still not verified
+
+- A real trackpad (the 0.01 per deltaY constant is an assumption), a real phone, macOS Safari pinch (gesture events are not
+  handled), a mouse that reports small pixel deltas.
+- Rulers and grid lines at fractional zooms: seen only in one screenshot at 72 %.
 
 ### Stage G: left rough
 
