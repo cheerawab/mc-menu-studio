@@ -1,19 +1,23 @@
 'use client';
 
 import { Grid3x3, Maximize, Minus, MousePointerClick, Plus, ZoomIn, ZoomOut } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   bbox, fitZoom, HANDLES, hitTest, MAX_ZOOM, MIN_ZOOM, rectFromPoints, rectPatchFor, rectsIntersect, resizeRect,
-  snapMoveDelta, SNAP_STEPS, zoomAround, type Handle, type SnapStep,
+  snapMoveDelta, SNAP_STEPS, type Handle, type SnapStep,
 } from '@/core/geometry';
 import {
-  isDoubleTap, isTap, keepInView, panBy, pinchView, TAP_SLOP, visibleHandles, type PinchStart, type Pt, type TapRecord,
+  isDoubleTap, isTap, keepInView, midpoint, panBy, pinchView, TAP_SLOP, visibleHandles, type PinchStart, type Pt,
+  type TapRecord,
 } from '@/core/gestures';
 import { createElement } from '@/core/model/defaults';
 import { addElements, updateElements } from '@/core/model/ops';
 import type { ElementType, Id, Rect } from '@/core/model/types';
 import { computeRegions, renderPage } from '@/core/render/renderPage';
 import type { Ctx2D } from '@/core/render/types';
+import {
+  clampZoom, crispAt, FIT_MS, ladderStep, PINCH_OVERSHOOT, restView, STEP_MS, wheelZoomFactor, ZOOM_EPS, zoomViewAround,
+} from '@/core/viewAnimation';
 import { renderEnv, useImagesVersion } from '../state/images';
 import { mobile } from '../state/mobile';
 import { fileToAsset } from '../state/persistence';
@@ -23,8 +27,13 @@ import { useLayout } from './layoutTier';
 import { DND_ELEMENT } from './LeftPanel';
 import { AlignButtons, ZOrderEndButtons } from './TouchControls';
 import { cx, IconButton, Segmented } from './ui';
+import { useViewAnimator } from './useViewAnimator';
 
 const RULER = 20;
+/** Margin around a page that fits at a whole zoom; smaller margin for the 100 % / fractional fit (compact, others). */
+const FIT_MARGIN = 48;
+const FIT_MIN_MARGIN_COMPACT = 12;
+const FIT_MIN_MARGIN = 24;
 
 // Mouse / pen: drag = move / resize / marquee, middle button or Space = pan.
 // Touch: one finger drags elements and handles or pans on empty space (tap = select / deselect, double tap on empty
@@ -88,7 +97,7 @@ function drawRuler(
   for (let p = start; p <= end; p += minor) {
     const pos = Math.round(offset + p * zoom) + 0.5;
     const isMajor = p % major === 0;
-    const len = isMajor ? 9 : p % (minor * 5) === 0 ? 6 : 3;
+    const len = isMajor ? 9 : (major / 2) % minor === 0 && p % (major / 2) === 0 ? 6 : 3;
     ctx.strokeStyle = isMajor ? '#59606e' : '#363b46';
     ctx.beginPath();
     if (orient === 'h') {
@@ -118,27 +127,21 @@ function drawRuler(
   else ctx.fillRect(RULER - 1, 0, 1, H);
 }
 
-/** Zoom one step around the centre of the stage. */
-function zoomStep(d: number) {
-  const view = editor().view;
-  const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, view.zoom + d));
-  if (z === view.zoom) return;
-  const el = document.querySelector('[data-stage]');
-  const r = el?.getBoundingClientRect();
-  const cxp = r ? r.width / 2 : 0, cyp = r ? r.height / 2 : 0;
-  editor().setView({ zoom: z, ...zoomAround(view.panX, view.panY, cxp, cyp, view.zoom, z) });
-}
-
 /** Compact tier: floating zoom buttons instead of the toolbar (for users who do not pinch). */
-function ZoomControls({ onFit }: { onFit: () => void }) {
+type ZoomFn = (dir: 1 | -1) => void;
+
+/** Zoom readout: a whole percent (0.47 -> 47 %, never 47.00000000000001 %). */
+const percent = (zoom: number) => `${Math.round(zoom * 100)}%`;
+
+function ZoomControls({ onFit, onZoom }: { onFit: () => void; onZoom: ZoomFn }) {
   const zoom = useEditor((s) => s.view.zoom);
   return (
     <div role="toolbar" aria-label="縮放" className="absolute top-7 right-2 z-20 flex items-center rounded-xl border border-ink-700 bg-ink-900/90 p-0.5 shadow-lg shadow-black/40 backdrop-blur">
-      <IconButton size="lg" label="縮小" disabled={zoom <= MIN_ZOOM} onClick={() => zoomStep(-1)}>
+      <IconButton size="lg" label="縮小" disabled={zoom <= MIN_ZOOM + ZOOM_EPS} onClick={() => onZoom(-1)}>
         <Minus size={18} />
       </IconButton>
-      <span className="w-12 text-center font-mono text-[13px] text-fg-muted tabular-nums" aria-live="polite">{zoom * 100}%</span>
-      <IconButton size="lg" label="放大" disabled={zoom >= MAX_ZOOM} onClick={() => zoomStep(1)}>
+      <span className="w-12 text-center font-mono text-[13px] text-fg-muted tabular-nums" aria-live="polite">{percent(zoom)}</span>
+      <IconButton size="lg" label="放大" disabled={zoom >= MAX_ZOOM - ZOOM_EPS} onClick={() => onZoom(1)}>
         <Plus size={18} />
       </IconButton>
       <IconButton size="lg" label="符合視窗" onClick={onFit}>
@@ -148,20 +151,19 @@ function ZoomControls({ onFit }: { onFit: () => void }) {
   );
 }
 
-function Toolbar({ onFit, scroll = false }: { onFit: () => void; scroll?: boolean }) {
+function Toolbar({ onFit, onZoom, scroll = false }: { onFit: () => void; onZoom: ZoomFn; scroll?: boolean }) {
   const view = useEditor((s) => s.view);
   const nSel = useEditor((s) => s.selection.length);
   const page = useEditor(currentPage);
-  const zoomBy = zoomStep;
   const sep = <div className="mx-1 h-4 w-px shrink-0 bg-line" />;
   return (
     // medium tier: the toolbar is wider than the canvas column, so it scrolls sideways
     <div className={cx('flex h-10 shrink-0 items-center gap-0.5 border-b border-line bg-ink-900 px-2', scroll && 'overflow-x-auto overflow-y-hidden')} role="toolbar" aria-label="畫布工具列">
-      <IconButton label="縮小（-）" onClick={() => zoomBy(-1)} disabled={view.zoom <= MIN_ZOOM}>
+      <IconButton label="縮小（-）" onClick={() => onZoom(-1)} disabled={view.zoom <= MIN_ZOOM + ZOOM_EPS}>
         <ZoomOut size={15} />
       </IconButton>
-      <span className="w-11 shrink-0 text-center font-mono text-[12px] text-fg-muted tabular-nums" aria-live="polite">{view.zoom * 100}%</span>
-      <IconButton label="放大（+）" onClick={() => zoomBy(1)} disabled={view.zoom >= MAX_ZOOM}>
+      <span className="w-11 shrink-0 text-center font-mono text-[12px] text-fg-muted tabular-nums" aria-live="polite">{percent(view.zoom)}</span>
+      <IconButton label="放大（+）" onClick={() => onZoom(1)} disabled={view.zoom >= MAX_ZOOM - ZOOM_EPS}>
         <ZoomIn size={15} />
       </IconButton>
       <IconButton label="符合視窗（0）" onClick={onFit}>
@@ -209,7 +211,7 @@ export default function CanvasView() {
   const rulerH = useRef<HTMLCanvasElement>(null);
   const rulerV = useRef<HTMLCanvasElement>(null);
   const gesture = useRef<Gesture | null>(null);
-  const wheelAcc = useRef(0);
+  const anim = useViewAnimator();
   const fittedFor = useRef<string | null>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [hoverId, setHoverId] = useState<Id | null>(null);
@@ -237,22 +239,33 @@ export default function CanvasView() {
     return () => ro.disconnect();
   }, []);
 
-  const fit = useCallback(() => {
-    const s = editor();
-    const p = currentPage(s);
+  /** 符合視窗 / the 0 key / double tap on empty space: eased; a page switch and the first layout: at once. */
+  const fit = useCallback((animated = true) => {
+    const p = currentPage(editor());
     const el = stageRef.current;
     if (!el) return;
     const w = el.clientWidth, h = el.clientHeight;
-    const z = fitZoom(w, h, p.width, p.height);
-    s.setView({ zoom: z, panX: Math.round((w - p.width * z) / 2), panY: Math.round((h - p.height * z) / 2) });
-  }, []);
+    const z = fitZoom(w, h, p.width, p.height, FIT_MARGIN, compact ? FIT_MIN_MARGIN_COMPACT : FIT_MIN_MARGIN);
+    anim.animateTo({ zoom: z, panX: Math.round((w - p.width * z) / 2), panY: Math.round((h - p.height * z) / 2) }, animated ? FIT_MS : 0);
+  }, [anim, compact]);
+
+  /** Zoom buttons and the = + - keys: the next ladder stop (from where a running zoom is heading), eased, around the
+   * centre of the stage. */
+  const zoomStep = useCallback((dir: 1 | -1) => {
+    const el = stageRef.current;
+    const goal = anim.target();
+    const z = clampZoom(ladderStep(goal.zoom, dir));
+    if (!el || Math.abs(z - goal.zoom) < ZOOM_EPS) return;
+    const centre = { x: el.clientWidth / 2, y: el.clientHeight / 2 };
+    anim.animateTo(restView(zoomViewAround(goal, z, centre)), STEP_MS);
+  }, [anim]);
 
   // fit when the page changes or the viewport is first measured
   useEffect(() => {
     if (!size) return;
     if (fittedFor.current === page.id) return;
     fittedFor.current = page.id;
-    fit();
+    fit(false);
   }, [page.id, size, fit]);
 
   // compact: when a sheet opens or closes the stage changes size; keep the view centre and the selection in sight
@@ -261,10 +274,11 @@ export default function CanvasView() {
     const prev = prevSize.current;
     prevSize.current = size;
     if (!compact || !prev || fittedFor.current === null || (prev.w === size.w && prev.h === size.h)) return;
+    anim.finish(); // a running zoom ends where it was heading, then moves with the stage
     const s = editor();
     const box = bbox(currentPage(s).elements.filter((e) => s.selection.includes(e.id)));
     s.setView(keepInView(s.view, prev, size, box));
-  }, [size, compact]);
+  }, [size, compact, anim]);
 
   // render the page bitmap
   useEffect(() => {
@@ -290,30 +304,26 @@ export default function CanvasView() {
     drawRuler(rulerV.current, 'v', size.h, panY, zoom, page.height, selBox ? [selBox.y, selBox.y + selBox.h] : null, cursor?.y ?? null);
   }, [size, panX, panY, zoom, page.width, page.height, selBox?.x, selBox?.y, selBox?.w, selBox?.h, cursor?.x, cursor?.y]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // wheel zoom (non-passive so we can prevent page scroll)
+  // wheel zoom (non-passive so we can prevent page scroll): continuous and eased around the cursor (ViewAnimator)
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const v = editor().view;
       if (e.shiftKey || e.altKey) {
+        anim.cancel();
+        const v = editor().view;
         editor().setView({ panX: v.panX - (e.deltaX || e.deltaY), panY: v.panY - (e.shiftKey ? 0 : e.deltaY) });
         return;
       }
-      wheelAcc.current += e.deltaY;
-      const threshold = e.ctrlKey ? 12 : 60;
-      if (Math.abs(wheelAcc.current) < threshold) return;
-      const dir = wheelAcc.current > 0 ? -1 : 1;
-      wheelAcc.current = 0;
-      const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.zoom + dir));
-      if (z === v.zoom) return;
+      const f = wheelZoomFactor(e.deltaY, e.deltaMode, e.ctrlKey);
+      if (f === 1) return;
       const r = el.getBoundingClientRect();
-      editor().setView({ zoom: z, ...zoomAround(v.panX, v.panY, e.clientX - r.left, e.clientY - r.top, v.zoom, z) });
+      anim.zoomBy(f, { x: e.clientX - r.left, y: e.clientY - r.top });
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [anim]);
 
   // space = temporary pan tool; 0 / - / = zoom shortcuts
   useEffect(() => {
@@ -327,12 +337,7 @@ export default function CanvasView() {
         e.preventDefault();
         setSpaceDown(true);
       } else if (e.key === '0') fit();
-      else if (e.key === '=' || e.key === '+' || e.key === '-') {
-        const v = editor().view;
-        const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.zoom + (e.key === '-' ? -1 : 1)));
-        const el = stageRef.current;
-        if (z !== v.zoom && el) editor().setView({ zoom: z, ...zoomAround(v.panX, v.panY, el.clientWidth / 2, el.clientHeight / 2, v.zoom, z) });
-      }
+      else if (e.key === '=' || e.key === '+' || e.key === '-') zoomStep(e.key === '-' ? -1 : 1);
     };
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') setSpaceDown(false);
@@ -343,7 +348,7 @@ export default function CanvasView() {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
     };
-  }, [fit]);
+  }, [fit, zoomStep]);
 
   const toPage = (clientX: number, clientY: number) => {
     const r = stageRef.current!.getBoundingClientRect();
@@ -453,11 +458,9 @@ export default function CanvasView() {
     if (!g) return;
     const s = editor();
     if (g.kind === 'pinch') {
+      // the zoom follows the fingers (a little past the limits, springing back on release); one store update per frame
       const a = pts.get(g.ids[0]), b = pts.get(g.ids[1]);
-      if (!a || !b) return;
-      const v = pinchView(g.start, a, b);
-      const cur = s.view;
-      if (v.zoom !== cur.zoom || v.panX !== cur.panX || v.panY !== cur.panY) s.setView(v);
+      if (a && b) anim.follow(pinchView(g.start, a, b, MIN_ZOOM, MAX_ZOOM, PINCH_OVERSHOOT));
       return;
     }
     if (g.kind === 'pan') {
@@ -475,8 +478,15 @@ export default function CanvasView() {
 
   const touchUp = (e: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
     const pts = touches.current;
-    if (!pts.delete(e.pointerId)) return;
+    if (!pts.has(e.pointerId)) return;
     const g = gesture.current;
+    if (g?.kind === 'pinch') {
+      // the pinch ends with the first finger that lifts: settle (whole zoom nearby, inside the limits) around the
+      // fingers' last midpoint
+      const a = pts.get(g.ids[0]), b = pts.get(g.ids[1]);
+      anim.settle(a && b ? midpoint(a, b) : stagePt(e.clientX, e.clientY));
+    }
+    pts.delete(e.pointerId);
     if (!g) return;
     if (g.kind === 'pinch' || g.kind === 'wait') {
       gesture.current = pts.size ? { kind: 'wait' } : null;
@@ -515,6 +525,7 @@ export default function CanvasView() {
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     lastPointerType.current = e.pointerType;
+    anim.cancel(); // a running zoom stops where it is; the new gesture starts from the view on screen
     if (e.pointerType === 'touch') {
       touchDown(e);
       return;
@@ -638,16 +649,18 @@ export default function CanvasView() {
   const W = page.width * zoom, H = page.height * zoom;
   const gridStep = view.snap > 1 ? view.snap : 8;
   const showGrid = view.showGrid && gridStep * zoom >= 6;
-  const regions = view.showRegions ? computeRegions(page) : [];
+  const regions = useMemo(() => (view.showRegions ? computeRegions(page) : []), [view.showRegions, page]);
+  // nearest-neighbour while page pixels are magnified on the device, the browser's smooth scaling when they shrink
+  const crisp = crispAt(zoom, window.devicePixelRatio || 1);
   const single = selectedEls.length === 1 ? selectedEls[0] : null;
   const hoverEl = hoverId && !selection.includes(hoverId) ? page.elements.find((x) => x.id === hoverId) : undefined;
   const cursorStyle = panning ? 'grabbing' : spaceDown ? 'grab' : hoverEl || (hoverId && selection.includes(hoverId)) ? 'move' : 'default';
 
   return (
     <div className="flex h-full flex-col">
-      {!compact && <Toolbar onFit={fit} scroll={tier === 'medium'} />}
+      {!compact && <Toolbar onFit={() => fit()} onZoom={zoomStep} scroll={tier === 'medium'} />}
       <div className="relative min-h-0 flex-1">
-        {compact && <ZoomControls onFit={fit} />}
+        {compact && <ZoomControls onFit={() => fit()} onZoom={zoomStep} />}
         <div className="absolute top-0 left-0 z-20 flex h-5 w-5 items-center justify-center border-r border-b border-line bg-ink-900 font-mono text-[8px] text-fg-dim">px</div>
         <canvas ref={rulerH} className="absolute top-0 right-0 left-5 z-10 h-5" style={{ width: size ? size.w : undefined }} aria-hidden />
         <canvas ref={rulerV} className="absolute top-5 bottom-0 left-0 z-10 w-5" style={{ height: size ? size.h : undefined }} aria-hidden />
@@ -694,7 +707,7 @@ export default function CanvasView() {
               ref={canvasRef}
               width={page.width}
               height={page.height}
-              className="pixelated absolute inset-0"
+              className={cx('absolute inset-0', crisp && 'pixelated')}
               style={{ width: W, height: H }}
               role="img"
               aria-label={`頁面「${page.title}」預覽`}

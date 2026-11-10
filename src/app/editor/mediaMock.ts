@@ -1,10 +1,12 @@
 // Test helper: a controllable window.matchMedia for jsdom (which has none). Understands the queries the editor uses:
-// (min-width / max-width / max-height: Npx), (pointer: coarse), (orientation: landscape | portrait), joined by "and".
+// (min-width / max-width / max-height: Npx), (pointer: coarse), (orientation: landscape | portrait),
+// (prefers-reduced-motion: reduce), joined by "and".
 
 export interface MediaEnv {
   width: number;
   height: number;
   coarse: boolean;
+  reducedMotion?: boolean;
 }
 
 function evaluate(query: string, env: MediaEnv): boolean {
@@ -18,6 +20,7 @@ function evaluate(query: string, env: MediaEnv): boolean {
     if (/\(pointer:\s*coarse\)/.test(part)) return env.coarse;
     if (/\(orientation:\s*landscape\)/.test(part)) return env.width > env.height;
     if (/\(orientation:\s*portrait\)/.test(part)) return env.width <= env.height;
+    if (/\(prefers-reduced-motion:\s*reduce\)/.test(part)) return !!env.reducedMotion;
     return false;
   });
 }

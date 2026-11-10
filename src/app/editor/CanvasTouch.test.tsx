@@ -3,14 +3,17 @@
 // and the touch reorder buttons, in the compact layout (mocked matchMedia: 390 x 844, coarse pointer).
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MAX_ZOOM } from '@/core/geometry';
 import { visibleHandles } from '@/core/gestures';
 import type { Element as El, Id } from '@/core/model/types';
 import { TEMPLATES } from '@/core/templates';
+import { FIT_MS, SETTLE_MS, STEP_MS, WHEEL_IDLE_MS } from '@/core/viewAnimation';
 import { mobile, resetMobile } from '../state/mobile';
-import { createEditorStore, currentPage, editor, setEditorStore } from '../state/store';
+import { createEditorStore, currentPage, editor, setEditorStore, type EditorStore } from '../state/store';
 import { installMatchMedia } from './mediaMock';
 
 let media: ReturnType<typeof installMatchMedia>;
+let store: EditorStore;
 
 beforeAll(() => {
   HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement['getContext'];
@@ -21,13 +24,16 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  vi.useFakeTimers(); // animation frames, performance.now and timers advance only through frames()
   media = installMatchMedia({ width: 390, height: 844, coarse: true });
   resetMobile();
-  setEditorStore(createEditorStore(TEMPLATES[0].build())); // "lobby": 340 x 210, buttons at (22,138) and (130,138)
+  store = createEditorStore(TEMPLATES[0].build()); // "lobby": 340 x 210, buttons at (22,138) and (130,138)
+  setEditorStore(store);
 });
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   media.restore();
 });
 
@@ -56,6 +62,12 @@ const buttonA = () => els()[10];
 const buttonB = () => els()[15];
 const centre = (e: El) => ({ x: e.x + e.w / 2, y: e.y + e.h / 2 });
 const OUTSIDE = { x: 380, y: 300 }; // empty stage, outside the 340 x 210 page
+/** Runs `ms` of fake time: animation frames every 16 ms, timers. */
+const frames = (ms = 16) => act(() => {
+  vi.advanceTimersByTime(ms);
+});
+const zoomReadout = () => screen.getByRole('toolbar', { name: '縮放' }).textContent;
+const pageCanvas = () => document.querySelector('[data-stage] canvas') as HTMLCanvasElement;
 
 describe('touch on the canvas', () => {
   it('tap selects, tap on empty space deselects, double tap on empty space fits', async () => {
@@ -69,8 +81,12 @@ describe('touch on the canvas', () => {
     act(() => editor().setView({ zoom: 4, panX: 7, panY: 9 }));
     tap(-20, -30); // above and left of the page
     tap(-16, -28);
-    expect(editor().view.zoom).toBe(1); // fitZoom of a 0 x 0 jsdom stage clamps to MIN_ZOOM
-    expect(editor().view.panX).toBe(-170);
+    expect(editor().view.zoom).toBe(4); // eased from the next frame on, no jump
+    frames(FIT_MS / 2);
+    expect(editor().view.zoom).toBeGreaterThan(1);
+    expect(editor().view.zoom).toBeLessThan(4);
+    frames(FIT_MS);
+    expect(editor().view).toMatchObject({ zoom: 1, panX: -170, panY: -105 }); // a 0 x 0 jsdom stage fits at 100 %
   });
 
   it('one finger drags an element (one undo step) or pans on empty space', async () => {
@@ -111,18 +127,66 @@ describe('touch on the canvas', () => {
     expect(editor().history.past.length).toBe(past);
   });
 
-  it('pinch zoom follows the fingers around their midpoint', async () => {
+  it('pinch zoom follows the fingers (one store update per frame) and settles on a whole zoom', async () => {
+    await mount();
+    let updates = 0;
+    const unsubscribe = store.subscribe((s, prev) => {
+      if (s.view !== prev.view) updates++;
+    });
+    touch('pointerDown', 1, 100, 400);
+    touch('pointerDown', 2, 200, 400);
+    touch('pointerMove', 2, 250, 400);
+    touch('pointerMove', 2, 300, 400);
+    expect(editor().view.zoom).toBe(1); // waits for the next animation frame
+    frames();
+    expect(updates).toBe(1); // two moves, one update
+    // page point (150, 400) under the start midpoint is now under the new midpoint (200, 400)
+    expect(editor().view).toMatchObject({ zoom: 2, panX: -100, panY: -400 });
+    // 40 small moves: a new zoom on every frame instead of whole steps
+    const seen = new Set<number>();
+    for (let i = 1; i <= 40; i++) {
+      touch('pointerMove', 2, 300 + i * 2.4, 400);
+      frames();
+      seen.add(editor().view.zoom);
+    }
+    unsubscribe();
+    expect(seen.size).toBe(40);
+    expect(editor().view.zoom).toBeCloseTo(2.96, 9);
+    // lifting a finger: 2.96 is within 5 % of 3, so it eases to 3 around the last midpoint (248, 400)
+    touch('pointerUp', 2, 396, 400);
+    frames(SETTLE_MS / 2);
+    expect(editor().view.zoom).toBeGreaterThan(2.96);
+    expect(editor().view.zoom).toBeLessThan(3);
+    frames(SETTLE_MS);
+    expect(editor().view).toMatchObject({ zoom: 3, panX: -202, panY: -800 }); // 150 * 3 - 202 = 248: still under it
+    touch('pointerUp', 1, 100, 400);
+    expect(editor().selection).toEqual([]);
+    expect(zoomReadout()).toContain('300%');
+  });
+
+  it('a pinch keeps a zoom that is not near a whole one, and springs back from past 800 %', async () => {
     await mount();
     touch('pointerDown', 1, 100, 400);
     touch('pointerDown', 2, 200, 400);
-    touch('pointerMove', 2, 300, 400);
-    // page point (150, 400) under the start midpoint is now under the new midpoint (200, 400)
-    expect(editor().view).toMatchObject({ zoom: 2, panX: -100, panY: -400 });
-    touch('pointerMove', 2, 220, 400); // fingers back to 120 px apart: 1.2x
-    expect(editor().view.zoom).toBeCloseTo(1.2, 12);
+    touch('pointerMove', 2, 340, 400); // 2.4x
+    frames();
+    touch('pointerUp', 2, 340, 400);
     touch('pointerUp', 1, 100, 400);
-    touch('pointerUp', 2, 220, 400);
-    expect(editor().selection).toEqual([]);
+    frames(SETTLE_MS * 2);
+    expect(editor().view.zoom).toBeCloseTo(2.4, 9);
+    expect(zoomReadout()).toContain('240%');
+
+    act(() => editor().setView({ zoom: 4 }));
+    touch('pointerDown', 1, 100, 400);
+    touch('pointerDown', 2, 200, 400);
+    touch('pointerMove', 2, 500, 400); // 4x: 1600 % without the limit
+    frames();
+    expect(editor().view.zoom).toBeGreaterThan(MAX_ZOOM);
+    expect(editor().view.zoom).toBeLessThan(MAX_ZOOM * 1.1);
+    touch('pointerUp', 2, 500, 400);
+    touch('pointerUp', 1, 100, 400);
+    frames(SETTLE_MS + 32);
+    expect(editor().view.zoom).toBe(MAX_ZOOM);
   });
 
   it('多選: a tap adds or removes an element', async () => {
@@ -156,16 +220,122 @@ describe('touch on the canvas', () => {
     expect(byId(a.id).w).toBe(a.w + 10);
   });
 
-  it('floating zoom buttons replace the toolbar in compact', async () => {
+  it('floating zoom buttons step along the zoom ladder, eased', async () => {
     await mount();
     expect(screen.queryByRole('toolbar', { name: '畫布工具列' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '放大' }));
-    expect(editor().view.zoom).toBe(2);
-    fireEvent.click(screen.getByRole('button', { name: '縮小' }));
     expect(editor().view.zoom).toBe(1);
+    frames(STEP_MS / 2);
+    const mid = editor().view.zoom;
+    expect(mid).toBeGreaterThan(1);
+    expect(mid).toBeLessThan(1.5);
+    fireEvent.click(screen.getByRole('button', { name: '放大' })); // while it runs: one stop past 150 %
+    frames(STEP_MS + 32);
+    expect(editor().view.zoom).toBe(2);
+    expect(zoomReadout()).toContain('200%');
+    fireEvent.click(screen.getByRole('button', { name: '縮小' }));
+    frames(STEP_MS + 32);
+    expect(editor().view.zoom).toBe(1.5);
     act(() => editor().setView({ zoom: 5 }));
     fireEvent.click(screen.getByRole('button', { name: '符合視窗' }));
+    frames(FIT_MS + 32);
+    expect(editor().view).toMatchObject({ zoom: 1, panX: -170, panY: -105 });
+  });
+
+  it('= + - keys step the ladder and 0 fits, eased', async () => {
+    await mount();
+    fireEvent.keyDown(window, { key: '=' });
+    frames(STEP_MS + 32);
+    expect(editor().view.zoom).toBe(1.5);
+    fireEvent.keyDown(window, { key: '-' });
+    fireEvent.keyDown(window, { key: '-' }); // two quick presses: two stops
+    frames(STEP_MS + 32);
+    expect(editor().view.zoom).toBeCloseTo(2 / 3, 12);
+    expect(zoomReadout()).toContain('67%');
+    fireEvent.keyDown(window, { key: '0' });
+    frames(FIT_MS + 32);
     expect(editor().view.zoom).toBe(1);
+  });
+
+  it('a pointer-down or a wheel event stops a running zoom where it is', async () => {
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    frames(48);
+    const z = editor().view.zoom;
+    expect(z).toBeGreaterThan(1);
+    touch('pointerDown', 1, OUTSIDE.x, OUTSIDE.y);
+    frames(STEP_MS * 2);
+    expect(editor().view.zoom).toBe(z);
+    touch('pointerUp', 1, OUTSIDE.x, OUTSIDE.y);
+
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    frames(48);
+    const z2 = editor().view.zoom;
+    fireEvent.wheel(stage(), { deltaY: -100, clientX: 0, clientY: 0 });
+    expect(editor().view.zoom).toBe(z2); // continues from here on the next frame
+    frames();
+    expect(editor().view.zoom).toBeGreaterThan(z2);
+  });
+
+  it('applies zoom targets at once with prefers-reduced-motion', async () => {
+    media.restore();
+    media = installMatchMedia({ width: 390, height: 844, coarse: true, reducedMotion: true });
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(editor().view.zoom).toBe(1.5);
+    tap(-20, -30);
+    tap(-16, -28);
+    expect(editor().view).toMatchObject({ zoom: 1, panX: -170, panY: -105 });
+    fireEvent.wheel(stage(), { deltaY: -100, clientX: 0, clientY: 0 });
+    expect(editor().view.zoom).toBeCloseTo(1.2, 9);
+  });
+
+  it('shows a whole percent and scales the page smoothly only below 100 %', async () => {
+    await mount();
+    expect(pageCanvas().className).toContain('pixelated');
+    act(() => editor().setView({ zoom: 0.47 })); // 0.47 * 100 = 47.00000000000001
+    expect(zoomReadout()).toBe('47%');
+    expect(pageCanvas().className).not.toContain('pixelated');
+    expect(parseFloat(pageCanvas().style.width)).toBeCloseTo(340 * 0.47, 6); // fractional CSS size, same bitmap
+    act(() => media.set({ width: 1440, height: 900, coarse: false }));
+    act(() => editor().setView({ zoom: 0.47 }));
+    expect(screen.getByRole('toolbar', { name: '畫布工具列' }).textContent).toContain('47%');
+  });
+});
+
+describe('wheel zoom', () => {
+  it('ctrl + wheel (trackpad pinch) zooms continuously around the cursor and settles on a whole zoom', async () => {
+    await mount();
+    act(() => editor().setView({ zoom: 2, panX: 0, panY: 0 }));
+    const seen = new Set<number>();
+    for (let i = 0; i < 17; i++) {
+      fireEvent.wheel(stage(), { deltaY: -4, ctrlKey: true, clientX: 100, clientY: 50 });
+      frames();
+      seen.add(editor().view.zoom);
+      const v = editor().view; // page point (50, 25) stays under the cursor
+      expect(v.panX + 50 * v.zoom).toBeCloseTo(100, 6);
+      expect(v.panY + 25 * v.zoom).toBeCloseTo(50, 6);
+    }
+    expect(seen.size).toBe(17);
+    expect(editor().view.zoom).toBeLessThan(2 * Math.exp(0.68)); // eased: still on its way to 3.95
+    frames(WHEEL_IDLE_MS + SETTLE_MS + 64);
+    expect(editor().view).toMatchObject({ zoom: 4, panX: -100, panY: -50 }); // 3.95 is within 5 % of 4
+  });
+
+  it('a mouse-wheel notch zooms 1.2x eased; Shift + wheel pans', async () => {
+    await mount();
+    fireEvent.wheel(stage(), { deltaY: -100, clientX: 0, clientY: 0 });
+    frames();
+    expect(editor().view.zoom).toBeGreaterThan(1);
+    expect(editor().view.zoom).toBeLessThan(1.2);
+    frames(WHEEL_IDLE_MS + 600);
+    expect(editor().view.zoom).toBeCloseTo(1.2, 9); // not near a whole zoom: stays
+    for (let i = 0; i < 5; i++) fireEvent.wheel(stage(), { deltaY: -100, clientX: 0, clientY: 0 });
+    frames(WHEEL_IDLE_MS + 600);
+    expect(editor().view.zoom).toBe(3); // 1.2^6 = 2.99 settles on 3
+    const { panX, panY } = editor().view;
+    fireEvent.wheel(stage(), { deltaY: 30, shiftKey: true });
+    expect(editor().view).toMatchObject({ zoom: 3, panX: panX - 30, panY });
   });
 });
 
