@@ -91,20 +91,32 @@ renders at 1x-4x with the page bitmap drawn at its GUI size), `ExportDialog` (+1
 follow), `crispAt` cases in the existing viewAnimation test. The client simulation (`helpers/clientSim.ts`) now reads
 scaled cells (fact 1/2 re-implemented, not imported) and refuses cells > 255 texels.
 
-### Stage H: what Hermes should verify
+### Stage H: checked by Hermes (2026-11-10; no Minecraft launched)
 
-In the game (nothing above 1x has run there):
-1. `exports/demo` (2x): calibration grid exact across tile seams, no missing-glyph boxes, corner hit boxes unchanged;
-   `lobby` text crisp at GUI 2 and 4, slightly uneven at GUI 3 (1.5 px per texel).
-2. `npm run demo:export -- --autotest --scale 3 --out exports/demo-3x` (24 px tiles of 72 texels, pixelScale = float
-   1/3: the most likely place for an off-by-one) and `--scale 4 --out exports/demo-4x` (16 px tiles): seams, offsets up
-   to 208, clicks and tooltips. 4x at GUI 2/3 should look jagged (texels dropped), as predicted.
-3. Compare `--scale 1` and `--scale 2` screenshots of `lobby` at the same GUI scale.
-In the browser:
-4. Export dialog: 解析度 control and hint, stats row, sizes; 屬性 → 專案 has the same control; the canvas re-renders;
-   on a 1x screen 2x looks smooth at 100 % and pixel-exact from 200 %, on a Retina screen crisp at 100 %.
-5. Game preview with 4x at GUI 1-3: texel dropping like the game, amber info text; a real phone with 4x on a large
-   page (9.6 Mpx canvas) for memory and export time.
+The owner looked at the result in the editor, said it looks fine and asked to stop testing, so the in-game part below stays open.
+
+Checked:
+- Own run (not only the agent's): `npm run lint`, `typecheck`, `test` (21 files, 193 tests) and `build` all exit 0.
+- `--scale 1` demo export (functions mode, with auto-test) is byte-identical to the export of d39d556: sha256 of
+  resourcepack.zip, datapack.zip and autotest.zip against a baseline made before Stage H started. The default export is
+  byte-identical to the committed `exports/demo`.
+- `bitmapAdvance` / `glyphAdvance` against a reference compiled with the game's own JDK that copies the decompiled float
+  arithmetic (`(int) (0.5 + actualWidth * pixelScale) + 1`, `pixelScale = (float) height / cellTexels`): 2,836 combinations
+  (tile 8-128, scale 1-4, every actual width) match. The agent was right that scale 3, 71 texels gives 25 (the brief said 24).
+- Pack structure read back from the zips: square tile cells of 32 / 64 / 72 / 64 texels with JSON `height` 32 / 32 / 24 /
+  16 at scale 1 / 2 / 3 / 4; tile sheets 512 / 1024 / 1152 / 1024 px wide; 26 / 26 / 28 / 33 y-offset fonts; hit-glyph
+  sheets identical. `resourcepack.zip` of the demo: 89 KB, 443 KB, 667 KB, 889 KB (2x is about 5x of 1x).
+- Browser (Chrome emulation, desktop 1440x900 @2x): the 解析度 picker in 屬性 → 專案 stores `renderScale` and re-renders the
+  page canvas at 1 / 2 / 3 / 4 texels per page px (a 340 px page gives a 340 / 680 / 1020 / 1360 px canvas); the canvas stays
+  `pixelated` at 352 % zoom for every scale; a stored project without the setting loads as 2x. At that zoom the 1x text is
+  blocky and strokes merge (歡 迎 選 擇 and the small card captions), 2x shows separate strokes, 3x / 4x add only a little
+  smoothness over 2x. This is the editor canvas; it says nothing about the game.
+
+Not verified (open):
+1. In the game: calibration seams exact at 2x, no missing-glyph boxes, hit boxes unchanged; `lobby` text at GUI 2 / 3 / 4.
+2. `--scale 3` (24 px tiles of 72 texels, pixelScale = float 1/3, the likeliest off-by-one) and `--scale 4` (16 px tiles,
+   offsets up to 208): seams, clicks, tooltips. 4x at GUI 2 / 3 should look jagged (predicted from the nearest sampler).
+3. Export dialog layout (not opened by Hermes), game preview with 4x at GUI 1-3, a real phone with 4x on a large page.
 
 ### Stage H: left rough
 
