@@ -64,6 +64,13 @@ async function main() {
     assert(Array.isArray(checked.issues), 'check.project did not return an issues array');
     console.log(`check.project: ${(checked.issues as unknown[]).length} issues, counts=${JSON.stringify(checked.counts)}`);
 
+    // 2c. preview.page writes a real PNG (exercises the @napi-rs/canvas native binding as a spawned subprocess)
+    const preview = await call(client, 'mcms.preview.page', { handle, pageId: firstPage.id });
+    const previewPath = preview.path as string;
+    const pngBytes = readFileSync(previewPath);
+    assert(pngBytes.length > 8 && pngBytes[0] === 0x89 && pngBytes[1] === 0x50, `preview.page did not write a valid PNG at ${previewPath}`);
+    console.log(`preview.page: ${previewPath} (${pngBytes.length} bytes, ${preview.width}x${preview.height})`);
+
     // 3. export.write
     const exported = await call(client, 'mcms.export.write', { handle, outDir });
     const files = exported.files as { resourcePack: string; dataPack: string; readme: string };
