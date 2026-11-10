@@ -104,16 +104,34 @@ on the confirm text, `px-4` on the empty-page hint); number inputs have `inputmo
 
 ### Stage F: not verified
 
-- Nothing ran in a real browser or on a real device (rules: no browser, no dev server needed; Hermes tests with a phone
-  viewport and touch emulation): actual layout and sheet heights, safe areas / notch, iOS Safari and Android Chrome
-  specifics (on-screen keyboard with 100dvh, `interactive-widget` is ignored by iOS Safari, long-press and double-tap
-  behaviour, `-webkit-touch-callout`), real multi-touch, blob downloads on phones.
-- The pointer tests run in jsdom: no layout (the stage sits at 0,0, so client px = page px at zoom 1), simulated
-  PointerEvents.
-- Opening the editor from a phone: `npm run dev` binds to the network, but Next 16 blocks cross-origin requests to
-  `/_next` dev resources unless `allowedDevOrigins` lists the host. Same-origin page loads should pass (no Origin
-  header on same-origin GETs) and the HMR websocket would be blocked; `npm run build` + `npm start` avoids the check.
-  The README gives both and says it is untested.
+- Not verified: a real phone or tablet, iOS Safari and Android Chrome specifics (on-screen keyboard with 100dvh,
+  `interactive-widget` is ignored by iOS Safari, `-webkit-touch-callout`), safe areas / notch, real multi-touch,
+  blob downloads on phones. The jsdom pointer tests have no layout; the checks below ran in Chrome.
+- Opening the editor from another device: Stage F's source-reading guess (the page loads, only hot reload is blocked) was
+  wrong (Hermes, tested): with `npm run dev` the page HTML loads from a non-localhost address but never starts
+  ("載入中…", 0 buttons) because Next 16 blocks `/_next/hmr` and the dev resources. Fixed in `next.config.ts` (`allowedDevOrigins` = this machine's own IPv4 addresses and host
+  name, read at start-up: restart after a network change). Checked from this computer's browser through its Wi-Fi
+  address and its VPN address: `npm run dev` and `npm start` both render the editor (107 buttons). The `.local` host name
+  navigation timed out and is untested. A real phone has not connected yet.
+
+### Stage F: checked in Chrome with device emulation (Hermes, 2026-11-10)
+
+Emulated 390x844 @3x, 844x390, 768x1024, 1024x768, 320x568 with touch (`pointer: coarse`) and CDP touch events:
+- No horizontal overflow at any size; `data-layout` = compact / compact / compact / medium (aside 208 + 264) / compact.
+- Compact: tab bar + sheets open and close, palette tap adds an element and collapses the sheet, selection toolbar
+  (nudge 1 → 8 → 16 px, 多選, 複製, 刪除, 上移, 下移), undo/redo, layer and page up/down buttons, 更多 sheet, ⋯ menu,
+  export and template dialogs, game preview (GUI 1-4 row, resolution select, long press = tooltip, tap elsewhere hides it).
+  Landscape: the panel opens from the right and the canvas keeps 276 px height.
+- Touch gestures (exact numbers): one-finger drag of an element moved it by the drag distance, one-finger drag on empty
+  space panned the view (selection kept), pinch zoomed around the midpoint to a whole zoom, two-finger drag panned,
+  a double tap < 300 ms on empty space fits the page, corner-handle drag resized (96x20 → 126x34).
+- Desktop (1440x900, real mouse events): unchanged layout (aside 244 + 304), mouse drag, arrow nudge, Ctrl+Z, marquee.
+- Touch targets: nothing below 40 px except the opacity slider track (16 px); all text inputs are 16 px in compact.
+- Bug found and fixed: the template gallery cards were squeezed to ~99 px in the phone sheet so the names and
+  descriptions were clipped (grid rows may shrink below the content of an `overflow-hidden` card); `auto-rows-max` fixes it.
+- Remaining small gaps: the page cannot be zoomed below 100%, so a page wider than the screen (e.g. 480x270 on a
+  phone) has to be panned; the multi-selection hint in 屬性 still talks about the top toolbar and Shift/arrow keys;
+  at 320 px wide the project name field is hidden.
 
 ### Stage F: known gaps (left alone on purpose)
 
