@@ -4,6 +4,12 @@ export type Id = string;
 
 export type SkinId = 'vanilla' | 'dark' | 'holo' | 'parchment';
 
+/**
+ * Export resolution ("解析度"): texels per page px in the exported pictures. The layout stays in page px (= GUI px in
+ * the game); a higher scale only gives the glyph bitmaps scale x scale more texels.
+ */
+export type RenderScale = 1 | 2 | 3 | 4;
+
 export type Action =
   | { type: 'none' }
   | { type: 'page'; pageId: Id }

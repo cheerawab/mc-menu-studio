@@ -142,48 +142,98 @@ export function measureTextWidth(env: RenderEnv, text: string, size: number, bol
   return Math.ceil(ctx.measureText(text).width);
 }
 
-const CACHE_MAX = 300;
-const cacheByEnv = new WeakMap<RenderEnv, Map<string, CanvasLike>>();
+/**
+ * "auto" pixelation: small text (<= PIXELATE_AUTO_MAX px) is thresholded only at scale 1. At a higher scale there are
+ * enough texels for smooth, anti-aliased glyphs, which is the point of the higher resolution.
+ */
+export const autoPixelate = (fontSize: number, scale: number): boolean => scale === 1 && fontSize <= PIXELATE_AUTO_MAX;
 
 /**
- * Draws `text` inside `rect` (clipped to it). The text is rasterised in white on a scratch canvas,
- * its alpha optionally thresholded, then coloured and composited with the shadow pixel by pixel,
- * so the result only depends on the canvas text rasteriser.
+ * Texels per page px of a text bitmap. Pixelated text keeps its retro look: rasterised at 1x, thresholded, then scaled
+ * up nearest-neighbour by the target's transform (so a pixelated label looks the same at every scale).
  */
-export function drawText(ctx: Ctx2D, env: RenderEnv, rect: Rect, text: string, st: TextStyle): void {
-  const W = Math.round(rect.w), H = Math.round(rect.h);
-  if (!text.trim() || W <= 0 || H <= 0) return;
-  const key = JSON.stringify([text, W, H, st]);
-  let cache = cacheByEnv.get(env);
-  if (!cache) cacheByEnv.set(env, (cache = new Map()));
-  const hit = cache.get(key);
-  if (hit) {
-    ctx.drawImage(hit, rect.x, rect.y);
-    return;
-  }
+export const textRasterScale = (st: TextStyle, scale: number): number => (st.pixelate ? 1 : scale);
 
+/** Cache key of a finished text bitmap: text, box, style and the raster scale. */
+export const textCacheKey = (text: string, w: number, h: number, st: TextStyle, rasterScale: number): string =>
+  JSON.stringify([text, w, h, st, rasterScale]);
+
+export interface TextLine {
+  text: string;
+  /** Left edge and vertical middle of the line, in page px relative to the text box. */
+  x: number;
+  y: number;
+}
+
+/**
+ * Lays the text out in page px: wrapping, alignment, vertical alignment and line height. `measure` must use the 1x font
+ * (size st.fontSize), so line breaks and positions are identical at every render scale.
+ */
+export function layoutText(measure: (s: string) => number, text: string, w: number, h: number, st: TextStyle): TextLine[] {
+  const shadowOff = st.shadow ? 1 : 0;
+  const avail = w - shadowOff;
+  const lines = wrapText(measure, text, avail, st.wrap);
+  const lh = Math.max(1, Math.round(st.fontSize * st.lineHeight));
+  const blockH = lines.length * lh;
+  let top = 0;
+  if (st.vAlign === 'middle') top = Math.floor((h - shadowOff - blockH) / 2);
+  else if (st.vAlign === 'bottom') top = h - shadowOff - blockH;
+  const out: TextLine[] = [];
+  lines.forEach((line, i) => {
+    if (!line) return;
+    const lw = Math.ceil(measure(line));
+    let x = 0;
+    if (st.align === 'center') x = Math.floor((avail - lw) / 2);
+    else if (st.align === 'right') x = avail - lw;
+    out.push({ text: line, x, y: top + i * lh + Math.round(lh / 2) });
+  });
+  return out;
+}
+
+const CACHE_MAX = 300;
+/** Texel budget of the bitmap cache per environment (4x text bitmaps are 16 times larger than 1x ones). */
+const CACHE_MAX_TEXELS = 6_000_000;
+interface TextCache {
+  map: Map<string, CanvasLike>;
+  texels: number;
+}
+const cacheByEnv = new WeakMap<RenderEnv, TextCache>();
+
+function remember(cache: TextCache, key: string, bmp: CanvasLike): void {
+  const size = bmp.width * bmp.height;
+  while (cache.map.size && (cache.map.size >= CACHE_MAX || cache.texels + size > CACHE_MAX_TEXELS)) {
+    const [oldKey, old] = cache.map.entries().next().value as [string, CanvasLike];
+    cache.map.delete(oldKey);
+    cache.texels -= old.width * old.height;
+  }
+  cache.map.set(key, bmp);
+  cache.texels += size;
+}
+
+/** Copies a text bitmap of (w * k) x (h * k) texels onto a w x h page-px box: texels map 1:1 at raster scale k. */
+function blit(ctx: Ctx2D, bmp: CanvasLike, x: number, y: number, w: number, h: number): void {
+  const smooth = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(bmp, x, y, w, h);
+  ctx.imageSmoothingEnabled = smooth;
+}
+
+/**
+ * Rasterises the laid-out text in white at k times the font size on a scratch canvas, optionally thresholds its alpha,
+ * then colours it and composites the shadow (k texels = 1 page px right and down) pixel by pixel, so the result only
+ * depends on the canvas text rasteriser. Returns a (w * k) x (h * k) bitmap.
+ */
+function rasterText(env: RenderEnv, w: number, h: number, text: string, st: TextStyle, k: number): CanvasLike | null {
+  const W = w * k, H = h * k;
   const { ctx: s } = scratch(env, W, H);
   s.clearRect(0, 0, W, H);
   s.font = fontString(st.fontSize, st.bold, st.family);
   s.textBaseline = 'middle';
   s.textAlign = 'left';
   s.fillStyle = '#ffffff';
-  const shadowOff = st.shadow ? 1 : 0;
-  const avail = W - shadowOff;
-  const lines = wrapText((t) => s.measureText(t).width, text, avail, st.wrap);
-  const lh = Math.max(1, Math.round(st.fontSize * st.lineHeight));
-  const blockH = lines.length * lh;
-  let top = 0;
-  if (st.vAlign === 'middle') top = Math.floor((H - shadowOff - blockH) / 2);
-  else if (st.vAlign === 'bottom') top = H - shadowOff - blockH;
-  lines.forEach((line, i) => {
-    if (!line) return;
-    const w = Math.ceil(s.measureText(line).width);
-    let x = 0;
-    if (st.align === 'center') x = Math.floor((avail - w) / 2);
-    else if (st.align === 'right') x = avail - w;
-    s.fillText(line, x, top + i * lh + Math.round(lh / 2));
-  });
+  const lines = layoutText((t) => s.measureText(t).width, text, w, h, st);
+  if (k !== 1) s.font = fontString(st.fontSize * k, st.bold, st.family);
+  for (const line of lines) s.fillText(line.text, line.x * k, line.y * k);
 
   const src = s.getImageData(0, 0, W, H).data;
   const out = s.createImageData(W, H);
@@ -195,24 +245,44 @@ export function drawText(ctx: Ctx2D, env: RenderEnv, rect: Rect, text: string, s
     const a = src[p + 3];
     return thr < 0 ? a / 255 : a >= thr ? 1 : 0;
   };
+  const shadowStep = 4 * (W * k + k);
   for (let y = 0, p = 0; y < H; y++) {
     for (let x = 0; x < W; x++, p += 4) {
       const ta = cov(p) * col.a;
-      const sa = sh && x > 0 && y > 0 ? cov(p - 4 * W - 4) * sh.a : 0;
+      const sa = sh && x >= k && y >= k ? cov(p - shadowStep) * sh.a : 0;
       const a = ta + sa * (1 - ta);
       if (a <= 0) continue;
-      const k = sa * (1 - ta);
-      o[p] = (col.r * ta + (sh ? sh.r * k : 0)) / a;
-      o[p + 1] = (col.g * ta + (sh ? sh.g * k : 0)) / a;
-      o[p + 2] = (col.b * ta + (sh ? sh.b * k : 0)) / a;
+      const m = sa * (1 - ta);
+      o[p] = (col.r * ta + (sh ? sh.r * m : 0)) / a;
+      o[p + 1] = (col.g * ta + (sh ? sh.g * m : 0)) / a;
+      o[p + 2] = (col.b * ta + (sh ? sh.b * m : 0)) / a;
       o[p + 3] = Math.round(a * 255);
     }
   }
   const finished = env.createCanvas(W, H);
   const fctx = finished.getContext('2d');
-  if (!fctx) return;
+  if (!fctx) return null;
   fctx.putImageData(out, 0, 0);
-  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value as string);
-  cache.set(key, finished);
-  ctx.drawImage(finished, rect.x, rect.y);
+  return finished;
+}
+
+/**
+ * Draws `text` inside `rect` (page px; the caller clips to it). `scale` = texels per page px of the target (the
+ * transform renderPage set up): the layout is computed in page px with 1x metrics, the glyphs are rasterised at
+ * font size x scale (1x for pixelated text) and the bitmap is copied with nearest sampling, so texels map 1:1.
+ */
+export function drawText(ctx: Ctx2D, env: RenderEnv, rect: Rect, text: string, st: TextStyle, scale = 1): void {
+  const W = Math.round(rect.w), H = Math.round(rect.h);
+  if (!text.trim() || W <= 0 || H <= 0) return;
+  const k = textRasterScale(st, scale);
+  const key = textCacheKey(text, W, H, st, k);
+  let cache = cacheByEnv.get(env);
+  if (!cache) cacheByEnv.set(env, (cache = { map: new Map(), texels: 0 }));
+  let bmp = cache.map.get(key);
+  if (!bmp) {
+    const fresh = rasterText(env, W, H, text, st, k);
+    if (!fresh) return;
+    remember(cache, key, (bmp = fresh));
+  }
+  blit(ctx, bmp, rect.x, rect.y, W, H);
 }

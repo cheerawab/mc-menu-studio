@@ -18,6 +18,8 @@ export interface Ctx2D {
   textBaseline: string;
   save(): void;
   restore(): void;
+  /** Multiplies the current transform (renderPage uses it to draw page px at `scale` texels each). */
+  scale(x: number, y: number): void;
   fillRect(x: number, y: number, w: number, h: number): void;
   clearRect(x: number, y: number, w: number, h: number): void;
   beginPath(): void;
@@ -57,6 +59,11 @@ export interface RenderOptions {
   placeholders?: boolean;
   /** Clear the canvas area of the page first. Default true. */
   clear?: boolean;
+  /**
+   * Texels per page px (1-4, default 1). `renderPage` multiplies the context's transform by it, so every element is
+   * still drawn in page px; the target must be `page.width * scale` x `page.height * scale` texels.
+   */
+  scale?: number;
 }
 
 export interface RenderResult {

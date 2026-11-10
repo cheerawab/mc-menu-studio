@@ -4,7 +4,7 @@ import type { Skin, SkinKit } from '../skins/types';
 import { darken } from './color';
 import { drawIcon } from './icons';
 import { fill, fillShape, gradientShape, SQUARE, strokeShape, type Corner } from './pixel';
-import { drawText, measureTextWidth, PIXELATE_AUTO_MAX, type TextStyle } from './text';
+import { autoPixelate, drawText, measureTextWidth, type TextStyle } from './text';
 import type { Ctx2D, RenderEnv } from './types';
 
 export interface DrawContext {
@@ -13,6 +13,8 @@ export interface DrawContext {
   env: RenderEnv;
   project: Project;
   placeholders: boolean;
+  /** Texels per page px of the target (RenderOptions.scale); drawing still happens in page px. */
+  scale: number;
 }
 
 /** Minecraft-style shadow: the text colour at 25% brightness. */
@@ -32,7 +34,7 @@ export function labelStyle(el: LabelElement, dc: DrawContext): TextStyle {
     vAlign: el.vAlign,
     lineHeight: el.lineHeight,
     wrap: el.wrap,
-    pixelate: el.pixelate === 'on' || (el.pixelate === 'auto' && el.fontSize <= PIXELATE_AUTO_MAX),
+    pixelate: el.pixelate === 'on' || (el.pixelate === 'auto' && autoPixelate(el.fontSize, dc.scale)),
   };
 }
 
@@ -76,13 +78,13 @@ export function drawElement(ctx: Ctx2D, el: Element, dc: DrawContext): void {
       if (tw)
         drawText(ctx, env, { x: cx, y: f.y, w: Math.max(1, Math.min(tw + 1, f.x + f.w - cx)), h: f.h }, text, {
           fontSize: el.fontSize, bold: el.bold, family, color, shadow, align: 'left', vAlign: 'middle',
-          lineHeight: 1.2, wrap: false, pixelate: el.fontSize <= PIXELATE_AUTO_MAX,
-        });
+          lineHeight: 1.2, wrap: false, pixelate: autoPixelate(el.fontSize, dc.scale),
+        }, dc.scale);
       return;
     }
 
     case 'label':
-      drawText(ctx, env, el, el.text, labelStyle(el, dc));
+      drawText(ctx, env, el, el.text, labelStyle(el, dc), dc.scale);
       return;
 
     case 'image': {
@@ -112,8 +114,8 @@ export function drawElement(ctx: Ctx2D, el: Element, dc: DrawContext): void {
         const size = Math.max(8, Math.min(14, h - 2));
         drawText(ctx, env, el, el.text, {
           fontSize: size, bold: false, family: dc.project.settings.fontFamily, color: look.text, shadow: look.shadow,
-          align: 'center', vAlign: 'middle', lineHeight: 1.1, wrap: false, pixelate: size <= PIXELATE_AUTO_MAX,
-        });
+          align: 'center', vAlign: 'middle', lineHeight: 1.1, wrap: false, pixelate: autoPixelate(size, dc.scale),
+        }, dc.scale);
       }
       return;
     }
