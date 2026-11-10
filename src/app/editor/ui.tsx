@@ -240,10 +240,11 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
       onClick={() => onChange(!checked)}
       className="group inline-flex items-center gap-2 text-[12.5px] text-fg-muted hover:text-fg"
     >
-      <span className={cx('relative h-4 w-7 rounded-full transition-colors', checked ? 'bg-accent' : 'bg-ink-600')}>
+      <span className={cx('relative h-4 w-7 shrink-0 rounded-full transition-colors', checked ? 'bg-accent' : 'bg-ink-600')}>
+        {/* left-0: a <button> centres its content (text-align: center), which moved the knob's static position to the middle of the track */}
         <span
           className={cx(
-            'absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform',
+            'absolute left-0 top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform',
             checked ? 'translate-x-3.5' : 'translate-x-0.5',
           )}
         />
