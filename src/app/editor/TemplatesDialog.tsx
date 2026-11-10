@@ -42,7 +42,7 @@ export default function TemplatesDialog() {
   if (!open) return null;
   return (
     <Modal title="範本庫" onClose={() => editor().openDialog(null)} width={880}>
-      <div className={cx('grid overflow-y-auto', compact ? 'grid-cols-1 gap-2.5 p-3 min-[600px]:grid-cols-2' : 'grid-cols-3 gap-3 p-4')}>
+      <div className={cx('grid auto-rows-max overflow-y-auto', compact ? 'grid-cols-1 gap-2.5 p-3 min-[600px]:grid-cols-2' : 'grid-cols-3 gap-3 p-4')}>
         {TEMPLATES.map((t, i) => (
           <button
             key={t.id}
