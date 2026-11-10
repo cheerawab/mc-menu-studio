@@ -23,6 +23,8 @@ renders pixel-positioned, clickable menus inside the vanilla Dialog screen. See 
    Hermes (the orchestrator) tests in the real game.
 4. Weekly model quota is limited: be frugal. No Playwright/Puppeteer/browser downloads. Do not re-read large files
    repeatedly. Keep command output short (pipe through `tail`/`head`). Prefer unit tests over manual exploration.
-5. Commit after each meaningful step (`git` is initialised; identity already configured).
+5. Commit after each meaningful step (`git` is initialised). Commits use the global git identity: do not set a local
+   `user.name` / `user.email`. Every commit message ends with a blank line followed by
+   `Co-authored-by: Claude <noreply@anthropic.com>`.
 6. Dev server only on port 3737; stop any server you start before finishing.
 7. When a stage ends, write/refresh `STATUS.md`: what works, what does not, exact commands to test, open questions.

@@ -137,7 +137,7 @@ level), re-enables the objective every tick. This is the planned "trigger mode".
   `lobby` (window screenshot diff vs the lobby preview 3.87, same as the direct lobby shot). So page navigation by trigger works.
 - VERIFIED: all 9 pages again pixel-correct with the Stage C export (mean abs diff vs source 3.9-14.9, wrong page 126); the corner
   squares of the calibration page have the exact colours at the exact corners; frame width 470 px = 256 GUI px * 1.8363.
-- BUG FOUND BY THE RUN (fixed, commit 05131c1): the autotest used `time query daytime`, which does not exist in 26.3 (timelines/world
+- BUG FOUND BY THE RUN (fixed, commit f661a40): the autotest used `time query daytime`, which does not exist in 26.3 (timelines/world
   clocks): "Whilst parsing command on line 23 ... 'minecraft:daytime' of type 'minecraft:timeline' not found" made the whole
   `mcms_autotest:tick` function fail (no PAGE markers at all). Now `time query minecraft:day`. Always check `latest.log` ~15 s after
   launch for `Failed to load function`.

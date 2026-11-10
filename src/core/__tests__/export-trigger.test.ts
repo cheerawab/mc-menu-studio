@@ -20,7 +20,7 @@ const opts = (mode: ExportMode, extra: Partial<ExportOptions> = {}): ExportOptio
 });
 const TAGS = ['data/minecraft/tags/function/load.json', 'data/minecraft/tags/function/tick.json'];
 
-/** Hashes produced by the Stage B exporter (commit 49c2340) for triggerPages() in direct mode, after_action close. */
+/** Hashes produced by the Stage B exporter (commit ac0815b) for triggerPages() in direct mode, after_action close. */
 const STAGE_B = {
   registry: 'c372f2d85e21bfb73abe44df6fe0e22a551d5c39',
   functions: 'c418a11e3d08417b8e6459bfcfcb60b5cbc559ae',

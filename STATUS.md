@@ -1,5 +1,10 @@
 # STATUS — Stage D (README for ordinary users) — done
 
+**Git history rewritten (2026-11-10, Stage E):** at the owner's request every commit's author/committer is now the repo
+owner and every commit message ends with a `Co-authored-by: Claude <noreply@anthropic.com>` trailer. File contents are
+unchanged except `LICENSE` (copyright holder `Cheerawab` in every commit that has the file; a second rewrite), so all
+commit hashes changed; the commit references in the docs (and one test comment) were updated.
+
 Stage A (editor, renderer, skins, templates, persistence), Stage B (exporter, demo CLI, Export dialog) and Stage C
 (trigger command mode, footer/after_action corrections from the decompiled client) are implemented. The exporter
 follows `docs/VERIFIED.md` (§13 for Stage C). Nothing here was run in Minecraft by me (rule: never launch the game);
@@ -12,7 +17,7 @@ Hermes tests the exports.
   exporter's `README_zh-TW.txt`), tested vs untested list, limits, size limits (formula + table from VERIFIED §16-18),
   the RPG-style PoC pages (marked as not buildable with the editor), FAQ. Developer commands and layout are in a
   `<details>` block at the end.
-- `src/app/editor/ui.tsx` (commit ec6eac0): the `Toggle` knob was drawn outside its track, over the label (the
+- `src/app/editor/ui.tsx` (commit bd26c48): the `Toggle` knob was drawn outside its track, over the label (the
   `<button>`'s `text-align: center` set the knob's static position to the middle of the track); `left-0` + `shrink-0`.
 - No exporter, renderer or in-app wording change; exports not regenerated. lint ✓, typecheck ✓, test ✓ (96/96).
 
