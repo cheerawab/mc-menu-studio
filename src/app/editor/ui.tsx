@@ -280,12 +280,13 @@ export function ColorInput({
 }) {
   const shown = value ?? fallback ?? '#000000';
   const [draft, setDraft] = useState<string | null>(null);
+  const compact = useLayout().tier === 'compact';
   const rgb = parseColor(shown);
   const hex6 = toHex({ ...rgb, a: 1 }, false);
   const alphaSuffix = value && value.length === 9 ? value.slice(7) : '';
   return (
     <div className="flex items-center gap-1.5">
-      <label className="checker relative h-7 w-7 shrink-0 cursor-pointer overflow-hidden rounded-md border border-ink-600" title="選擇顏色">
+      <label className={cx('checker relative shrink-0 cursor-pointer overflow-hidden rounded-md border border-ink-600', compact ? 'h-10 w-10' : 'h-7 w-7')} title="選擇顏色">
         <span className="absolute inset-0" style={{ background: shown }} />
         {value === null && <span className="absolute inset-x-0 bottom-0 bg-black/55 text-center text-[8px] leading-3 text-white">預設</span>}
         <input

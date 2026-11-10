@@ -125,10 +125,13 @@ function useShortcuts() {
 }
 
 /** Touch-layout housekeeping: sheets only exist in compact, 多選 ends with the selection, Enter / double tap opens 屬性. */
-function useTouchSync(tier: LayoutTier) {
+function useTouchSync(tier: LayoutTier, touchUi: boolean) {
   useEffect(() => {
     if (tier !== 'compact') mobile().openSheet(null);
   }, [tier]);
+  useEffect(() => {
+    if (!touchUi) mobile().setMultiSelect(false);
+  }, [touchUi]);
   useEffect(
     () =>
       getEditorStore().subscribe((s, prev) => {
@@ -143,7 +146,7 @@ export default function Editor() {
   const layout = useLayoutInfo();
   const mode = useEditor((s) => s.view.mode);
   useShortcuts();
-  useTouchSync(layout.tier);
+  useTouchSync(layout.tier, layout.touchUi);
   return (
     <LayoutContext.Provider value={layout}>
       {/* data-layout is a stable hook for tests: compact (< 900 px) | medium (900-1279 px) | desktop (>= 1280 px) */}

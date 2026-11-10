@@ -1,6 +1,132 @@
-# STATUS — Stage D (README for ordinary users) — done
+# STATUS — Stage F (phones and tablets) — done
 
-**Git history rewritten (2026-11-10, Stage E):** at the owner's request every commit's author/committer is now the repo
+## Stage F: what changed
+
+Owner's request: 「新增可以對手機友善」. The editor now adapts to phones and tablets; desktop (>= 1280 px wide) keeps
+the same DOM structure and look. Exporter, renderer, data model and persistence format are untouched (one store action
+added: `cancelGesture`). No new dependencies. Commits: fe465b5 (tiers, shell, sheets), 7a07ba4 (touch canvas),
+626a42f (dialogs, preview, viewport), plus the docs commit.
+
+**Layout tiers** (`src/app/editor/layoutTier.ts`, the single source of truth): `useLayoutTier()` = matchMedia +
+useSyncExternalStore: `compact` < 900 px, `medium` 900-1279 px, `desktop` >= 1280 px; on the server and without
+matchMedia (jsdom) it is `desktop`. Editor computes `LayoutInfo { tier, coarse, landscape, touchUi }` once
+(`(pointer: coarse)`, `(orientation: landscape)`, `touchUi = compact || coarse`) and provides it through
+`LayoutContext`; the root has `data-layout="compact|medium|desktop"`. Shell: `.app-shell` (100dvh; Lightning CSS drops
+the 100vh fallback because every default Next browser target supports dvh), no minimum width, `touch-action:
+manipulation`; `overscroll-behavior: none` on html/body.
+- medium: the three columns with 208 / 264 px side panels (canvas column 426 px at 900 px), logo mark only, project
+  name 144 px, no GUI scale / window size in the top bar (they move into the game preview's header), canvas toolbar
+  scrolls sideways.
+- compact (`CompactShell.tsx`): top bar = project name (moves into the ⋯ menu below 360 px), icon-only 編輯 / 遊戲預覽,
+  復原, 重做, 匯出 (label from 440 px), ⋯ menu (範本庫…, 新專案, 匯入 / 匯出專案 JSON; in edit mode 顯示格線, 顯示點擊區域,
+  吸附 1/2/4/8). Bottom tab bar 元件 頁面 圖層 屬性 更多 (`role="tablist"` / `role="tab"`, `aria-selected`,
+  `aria-controls="sheet-<id>"`, icon-only with aria-labels in landscape, error/warning badge on 更多). One sheet at a
+  time (`role="dialog"`, `id="sheet-<id>"`), part of the layout (the canvas shrinks, zoom/pan kept): portrait = lower
+  half (flex-basis 50 %), landscape = docked right (min(380 px, 50 %)). Close: the active tab again, 關閉面板 (×), Esc.
+  Sheets reuse the panel contents: `Palette`, `Pages`, `Layers` (exported from LeftPanel), `Inspector`, `LinkMap`,
+  `IssuesPanel` (exported from RightPanel); 更多 = segmented 連結 / 檢查 (uses `rightTab`).
+- `src/app/state/mobile.ts`: tiny zustand store for touch-only UI state (open sheet, 多選, nudge step); not persisted,
+  not in the undo history.
+
+**Touch on the canvas** (`CanvasView.tsx`; pure math in `src/core/gestures.ts`): touch pointers are tracked apart from
+mouse/pen. One finger: tap selects (tap on empty space deselects), drag on an element moves it (8 px tap slop, snapping
+as before, one undo step), drag on a handle resizes, drag on empty space pans; double tap on empty space = fit, double
+tap on an element = edit its text (opens 屬性). Two fingers: pinch zoom around the midpoint (whole zoom steps, clamped
+1-8) plus two-finger pan in one formula; a second finger cancels a move/resize in progress (`store.cancelGesture`: back
+to the gesture snapshot, no history entry); remaining fingers are ignored until all are lifted. Mouse/pen unchanged
+(marquee, Space / middle-button pan, Shift/Cmd/Ctrl additive, wheel zoom). Long press does not open the browser menu
+(contextmenu prevented for touch, `-webkit-touch-callout: none`). `(pointer: coarse)`: handles get a 28 px hit area
+around a 12 px square; edge handles are hidden when they would overlap the corners, tiny elements keep only `se`.
+Compact: floating 縮小 / zoom % / 放大 / 符合視窗 buttons instead of the toolbar; when the stage resizes (sheet opens or
+closes) the view keeps its centre and the selection stays in view.
+
+**Selection bar** (`TouchControls.tsx`, shown while something is selected in compact, and in any tier with a coarse
+pointer; hidden while a sheet is open): 多選, 往左 / 往上 / 往下 / 往右, step button (`移動距離 N 像素`: 1 → 8 → 16),
+複製, 刪除, 上移, 下移, 對齊與排列 (a second row with the 6 align, 2 distribute, top/bottom buttons). 44 px buttons,
+wraps to two rows on phones. Uses the existing store actions (nudge, duplicateSelected, deleteSelected, zOrder, align,
+distribute).
+
+**Reorder without DnD** (touch UI): the current page's row shows 頁面上移 / 頁面下移 / 複製頁面 / 刪除頁面, selected layer
+rows show 圖層上移 / 圖層下移 and the eye/lock buttons (also shown whenever hidden/locked is on); rows are 44 px and not
+`draggable`. Desktop DnD rows unchanged. Layer-row taps toggle while 多選 is on.
+
+**Dialogs, menus, toasts**: `Modal` in compact = sheet from the bottom edge, full width, at most the screen height minus
+the top safe area, content scrolls, 44 px close button; the backdrop closes on a click whose pointerdown was also on
+the backdrop (desktop: was mousedown). Confirm buttons share the width; templates one column (two from 600 px); export
+dialog one column. Menus close on outside `pointerdown` (desktop 檔案 menu too). Toasts sit under the top bar in compact.
+
+**Game preview**: touch tap = the simulated click (the compatibility click that follows is ignored), long press 400 ms =
+tooltip, which stays until the next pointerdown anywhere; outside desktop the header wraps and contains the window size
+select and the GUI 1-4 buttons (44 px in compact); compact uses 8 px padding and puts the hint text under the preview.
+
+**Sizes**: compact `Button` 44 px, `IconButton` xs/sm/md → 32/40/40 px, new `lg` = 44 px, `Segmented` 40 px (+ frame),
+color swatch 40 px; `[data-layout="compact"]` CSS: base text 14 px, inputs/selects/textareas 16 px and >= 40 px tall
+(no iOS focus zoom), switches >= 40 px, arbitrary text classes bumped (12/12.5/13 → 14, 11.5 → 13, 10.5/11 → 12.5).
+`NumberInput` `inputMode`: numeric (integers >= 0), decimal (fractions >= 0), none where negatives are allowed (X/Y).
+Viewport: `width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content`, page pinch-zoom
+not disabled; safe-area padding on the top bar, tab bar, sheets row and compact dialogs. The new sheet animation
+(140 ms) is off with `prefers-reduced-motion: reduce`. Inspector: on touch layouts a 觸控操作 list replaces 快速鍵.
+
+**Tests** (+39, 135 total): `src/core/__tests__/gestures.test.ts` (tap, double tap, pinch, pan, handles, keep-in-view),
+`layoutTier.test.tsx` (width mapping, no-matchMedia fallback, live changes), `CompactShell.test.tsx` (shell, sheets
+open/close via tab / × / Esc, add from 元件, Enter opens 屬性, ⋯ menu, tier switching), `CanvasTouch.test.tsx`
+(simulated touch pointer events: tap, drag, pan, pinch, second-finger cancel, 多選, handles + resize, zoom buttons,
+selection bar actions, layer/page up-down, medium + coarse), `CompactDialogs.test.tsx` (dialog sheets, backdrop, confirm,
+templates, toasts, preview tap / long press / navigation, viewport, shell CSS), store `cancelGesture`. `mediaMock.ts`
+is the matchMedia stub. `Editor.test.tsx` is unchanged and passes (no matchMedia → desktop).
+
+Desktop DOM differences (no visual change intended): root `data-layout="desktop"` + `app-shell` instead of
+`h-screen min-w-[1280px]`; a few added no-op classes (`shrink-0` on icons / separators / the toolbar's page size,
+`no-callout` on the stage, `select-none no-callout touch-manipulation` on the preview canvas, `min-h-0 overflow-y-auto`
+on the confirm text, `px-4` on the empty-page hint); number inputs have `inputmode="numeric"` or none instead of
+`decimal`; the modal backdrop closes on click instead of mousedown.
+
+### Stage F decisions (nobody could be asked)
+
+- Breakpoints by width only (900 / 1280). Pointer type is a second axis: `touchUi = compact || (pointer: coarse)` turns
+  on the selection bar, touch rows, up/down reorder and disables HTML5 drag on rows and the palette; the larger handles
+  follow `(pointer: coarse)` only. So a touch tablet in landscape (medium) also gets the selection bar.
+- Landscape phone: a side sheet instead of a short bottom sheet (at 844 x 390 a bottom sheet that leaves the canvas 180
+  px would show about 100 px of content); the canvas keeps the full height between the bars (about 280 px).
+- Selecting never opens a sheet; double tap on an element and Enter open 屬性 (text edit, like double click).
+- Adding an element from 元件 closes the sheet (the new element is selected and visible with the selection bar).
+- The selection bar hides while a sheet is open (the sheet has the same actions; keeps the shrunken canvas visible).
+- Nudge step cycles 1 → 8 → 16 px per tap (keyboard keeps 1 / Shift 8).
+- 多選: a tap toggles; dragging a selected element moves the whole selection; tap on empty space still deselects all;
+  多選 turns off when the selection becomes empty or the touch UI goes away.
+- Pinch zoom snaps to whole zoom levels (the editor only uses integer zoom: square pixels, rulers, grid).
+- A touch on an element selects it at once (like mouse down), so a pinch that starts on an element selects it.
+- Game preview: long press (400 ms) for the tooltip, not the first tap; a tap is always the click, as in the game.
+- Compact dialogs: natural height up to the screen (export / templates nearly full height, confirm stays short).
+- Compact toasts at the top (bottom has the tab bar and the selection bar).
+- Page pinch-zoom stays allowed (accessibility); only the canvas stage uses `touch-action: none`.
+- Drag-down-to-close for sheets: skipped (optional).
+
+### Stage F: not verified
+
+- Nothing ran in a real browser or on a real device (rules: no browser, no dev server needed; Hermes tests with a phone
+  viewport and touch emulation): actual layout and sheet heights, safe areas / notch, iOS Safari and Android Chrome
+  specifics (on-screen keyboard with 100dvh, `interactive-widget` is ignored by iOS Safari, long-press and double-tap
+  behaviour, `-webkit-touch-callout`), real multi-touch, blob downloads on phones.
+- The pointer tests run in jsdom: no layout (the stage sits at 0,0, so client px = page px at zoom 1), simulated
+  PointerEvents.
+- Opening the editor from a phone: `npm run dev` binds to the network, but Next 16 blocks cross-origin requests to
+  `/_next` dev resources unless `allowedDevOrigins` lists the host. Same-origin page loads should pass (no Origin
+  header on same-origin GETs) and the HMR websocket would be blocked; `npm run build` + `npm start` avoids the check.
+  The README gives both and says it is untested.
+
+### Stage F: known gaps (left alone on purpose)
+
+- HTML5 drag and drop stays mouse-only: palette → canvas (touch: tap adds), layer/page reorder (touch: up/down
+  buttons), image files dropped on the canvas (touch: add an 圖片 element and use its upload button in 屬性).
+- Medium tier on a touch tablet keeps desktop-sized panel controls apart from the touch rows (most buttons 24-28 px);
+  only compact enlarges everything.
+- Compact leftovers below 44 px: inspector icon picker cells (32 px tall), the 20 px rulers (kept).
+- Desktop hover-only helpers (hover outline, cursor readout) simply do nothing on touch; the cursor readout is hidden in
+  compact.
+
+**Stage E: git history rewritten (2026-11-10):**
+At the owner's request every commit's author/committer is now the repo
 owner and every commit message ends with a `Co-authored-by: Claude <noreply@anthropic.com>` trailer. File contents are
 unchanged except `LICENSE` (copyright holder `Cheerawab` in every commit that has the file; a second rewrite), so all
 commit hashes changed; the commit references in the docs (and one test comment) were updated.
@@ -44,14 +170,20 @@ npm install
 npm run dev            # editor at http://localhost:3737 (匯出 button opens the Export dialog)
 npm run lint           # eslint
 npm run typecheck      # tsc --noEmit, strict
-npm test               # vitest: 96 tests, ~3 s
+npm test               # vitest: 135 tests, ~4 s
 npm run build          # production build
 npm run demo:export -- --mode both --autotest                    # trigger mode (default) -> exports/demo/ + HANDOFF.md
 npm run demo:export -- --mode both --autotest --commands direct --out exports/direct   # Stage B behaviour
 npm run preview:skins  # PNG previews of templates/icons/game mock -> exports/previews/
 ```
 
-Last run (this stage): lint ✓, typecheck ✓, test ✓ (96/96), build ✓, demo export ✓ (0.7 s; two runs give identical
+Phone check (Hermes): any browser's device mode, e.g. 390x844, 844x390, 768x1024 with touch emulation, and 1024x768;
+`[data-layout]` on the editor root tells the tier.
+
+Last run (Stage F): `npm run lint`, `npm run typecheck`, `npm test` (135/135) and `npm run build` all exit 0. Demo export
+not re-run (exporter, renderer and data model untouched; the golden export tests pass).
+
+Last run (Stage C/D): lint ✓, typecheck ✓, test ✓ (96/96), build ✓, demo export ✓ (0.7 s; two runs give identical
 SHA-1 for all six zips and the READMEs). `--commands direct` reproduces the Stage B demo zips byte for byte (resource
 pack, data pack and autotest of both modes, compared by SHA-1 against an export made with the Stage B code before any
 change); a unit test pins the same property on a synthetic fixture. The resource pack is identical in all four
