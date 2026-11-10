@@ -1,4 +1,113 @@
-# STATUS — Stage F (phones and tablets) — done
+# STATUS — Stage G (smooth zoom) — done
+
+## Stage G: what changed
+
+Owner: 「縮放不夠絲滑」. Hermes measured (Chrome device emulation, page canvas width every frame): a pinch took only
+whole zooms (340 → 680 → 1020 px), ctrl + wheel 7 whole steps, buttons / keys / fit / double tap jumped in one frame;
+the frame rate was fine (median 16.7 ms, also with 4x CPU throttle). So: continuous zoom plus animation, no new
+rendering path (the page is still one bitmap canvas scaled by CSS, overlays at `x * zoom`). Exporter, renderer, data
+model and persistence untouched (zoom / pan are not saved). Commits: 3eb4ecb (math + tests), 62ef3f7 (animator +
+canvas + tests), plus the docs commit.
+
+- `src/core/viewAnimation.ts` (pure): zoom ladder + `ladderStep`, `settleZoom`, `rubberBand`, `easeOutCubic`,
+  `interpolateView` (zoom changes geometrically, the pan keeps the fixed point of the change still, so a zoom made
+  around an anchor stays anchored on every frame; ends exactly on the target), `zoomViewAround`, `restView` (whole
+  zoom → pan rounded), `wheelZoomFactor`, `approachZoom` (wheel smoothing in log scale), `crispAt`, the constants.
+- `src/core/gestures.ts`: `pinchZoom` / `pinchView` no longer round (zoom follows the fingers, pan stays a float),
+  optional overshoot. `src/core/geometry.ts`: `MIN_ZOOM` 0.25 (`MAX_ZOOM` 8), new `fitZoom` rule, `zoomAround` no
+  longer rounds. `panBy` (one-finger pan) and `keepInView` (stage resize) still round: they work at rest.
+- `src/app/editor/useViewAnimator.ts`: `ViewAnimator` + `useViewAnimator()`, the only code that moves the view over
+  time: `animateTo(view, ms)`, `zoomBy(factor, anchor)` (wheel), `follow(view)` (pinch: one `setView` per animation
+  frame), `settle(anchor)`, `target()`, `cancel()`, `finish()`, `dispose()`. A frame is requested only while there is
+  work (no permanent rAF loop); disposed on unmount and usable again after a StrictMode remount. With
+  `prefers-reduced-motion: reduce` targets are applied at once (the pinch still follows the fingers).
+- `CanvasView.tsx`: the three zoom paths (zoomStep, wheel handler, key handler) now go through the animator.
+  - Pinch: fractional zoom around the finger midpoint plus two-finger pan, rubber band up to 10 % past 25 % / 800 %;
+    when the first finger lifts (or on pointercancel) it settles around the last midpoint.
+  - Wheel: ctrl + wheel (trackpad pinch) and small deltas zoom continuously, a mouse notch 1.2x; target zoom eased
+    around the cursor; 150 ms after the last wheel event the same settle as a pinch. Shift / Alt + wheel pans as
+    before (stops a running zoom first).
+  - 縮小 / 放大 buttons (compact and toolbar) and the = + - keys: next ladder stop, eased around the stage centre;
+    pressed again while it runs, they step on from the stop being approached. 符合視窗, the 0 key and a double tap on
+    empty space ease zoom and pan to the fit view; switching pages and the first layout still fit at once.
+  - Any pointer-down on the stage or a wheel event stops a running animation where it is (no jump). A stage resize
+    (compact sheet) first finishes a running zoom, then keeps the view centre as before.
+  - Readout `Math.round(zoom * 100)%` (compact controls and toolbar); disabled states with a 0.001 epsilon.
+  - Page canvas: `.pixelated` only while zoom × devicePixelRatio >= 1, the browser's smooth scaling below that.
+  - Rulers: medium ticks at half the major step (when that is a multiple of the minor step): the same ticks as before
+    at every whole zoom 1-8, and aligned at 25 % (before: 125 / 250 next to labels at 200 / 400). Overlays, handles,
+    marquee, snapping, hit tests and drop positions were checked: they work in page px × zoom, no integer assumption.
+  - The click-region overlay list is memoised (the canvas re-renders on every animation frame while zooming).
+
+### Stage G decisions (nobody could be asked)
+
+- Ladder: 25, 33⅓, 50, 66⅔, 100, 150, 200, 300, 400, 500, 600, 800 % (the brief's example; 1/3 and 2/3 exact, shown
+  as 33 % / 67 %). "+" = first stop more than 0.1 % above the current (or approached) zoom, "−" likewise below; the
+  ends stay. From a pinch zoom of 240 %: + → 300 %, − → 200 %.
+- Settle: within 5 % of a whole zoom n >= 1 (|z − n| <= 0.05 n: 0.95-1.05 → 100 %, 2.85-3.15 → 300 %, 7.6-8 → 800 %),
+  otherwise the zoom stays exactly as left (2.7 stays 270 %). 0.97 → 100 % on purpose: just under 100 % is the
+  blurry, smooth-scaled case on a 1x screen and 100 % is the most useful level. Only after a pinch or a wheel zoom;
+  buttons, keys and fit pick their own target. At a whole zoom the resting pan is rounded to whole CSS px (crisp
+  pixels); fractional zooms keep a float pan (rounding would not make them crisper).
+- Rubber band: kept (simple): log-scale damping with slope 1 at the limit, never more than 10 % past it; springs back
+  with the settle animation.
+- Durations (ease-out cubic): settle 120 ms, ladder step 180 ms, fit 220 ms. Wheel: time constant 70 ms (a notch is
+  95 % done after about 210 ms), settle after 150 ms without wheel events.
+- Wheel factor (one event never more than one notch): line / page mode or |deltaY| >= 50 = a notch (×1.2);
+  ctrl + small deltas exp(−deltaY × 0.01), assuming Chrome reports a trackpad pinch as about −100·ln(scale) per event
+  (not measured); other small deltas (two-finger scroll, smooth wheels; a plain wheel zooms in this editor, as before)
+  exp(−deltaY × 0.002), i.e. 100 px of scrolling ≈ one notch.
+- Fit: the largest whole zoom (<= 800 %) that leaves 48 px (unchanged); if none >= 100 % does, 100 % when the page
+  fits with a small margin (compact 12 px, medium / desktop 24 px), else the exact fraction with that margin. "Lobby"
+  340×210 on a 390 px phone stays at 100 %; 480×270 → 72 % (390×844 portrait), 87 % (844×390 landscape). A 0×0 stage
+  (jsdom) gives 100 %.
+- Smooth scaling only below 1 device px per page px (deviation from the brief's "zoom < 1"): on a 3x phone 72 % is still
+  2.16 device px per page px, where bilinear scaling would blur the pixel art. On a 1x screen it switches below 100 %,
+  on a 2x screen below 50 %.
+- Pinch updates go through requestAnimationFrame; the one-finger pan and the mouse pan still update per event (browsers
+  already deliver pointer moves once per frame, and Hermes measured no frame problem).
+- Safari's macOS trackpad pinch (`gesturechange`, no ctrl + wheel) is still not handled: iOS Safari fires the same
+  events for touch pinches, which the pointer path already handles.
+
+### Stage G tests (+26, 161 total)
+
+`src/core/__tests__/viewAnimation.test.ts` (ladder from whole and fractional zooms and at the ends, settle tolerance,
+pan rounding, rubber band, easing endpoints, interpolation endpoints and anchor invariance, wheel factor monotonic and
+symmetric, smoothing, crisp scaling), `gestures.test.ts` (80 → 120 px from zoom 2 = 3, 80 → 100 = 2.5, midpoint stays
+under the fingers at fractional zooms, overshoot), `geometry.test.ts` (new fitZoom rules, unrounded zoomAround),
+`src/app/editor/useViewAnimator.test.ts` (hand-driven clock: ease-out ends exactly on the target and stops asking for
+frames, pinch coalescing, wheel accumulate / ease / settle, cancel / finish / dispose, reduced motion),
+`CanvasTouch.test.tsx` (fake timers: a 40-move pinch gives 40 distinct zooms with one store update per frame and settles
+2.96 → 3 around the midpoint; 2.4 stays; overshoot springs back to 800 %; buttons and keys step the ladder eased;
+fit / double tap eased; pointer-down and wheel stop an animation; reduced motion; whole-percent readout in compact and
+desktop; smooth scaling below 100 %; ctrl + wheel continuous and settles; wheel notch; Shift + wheel pans).
+`mediaMock.ts` understands `(prefers-reduced-motion: reduce)`.
+
+### Stage G: not verified — what Hermes should measure
+
+Nothing here ran in a real browser or on a phone (rule); jsdom has no layout (0×0 stage) and fake rAF / timers.
+Sample `document.querySelector('[data-stage] canvas').getBoundingClientRect().width` (or its `style.width`) every
+animation frame, page "lobby" (340 px wide):
+- Pinch 80 → 240 px over 40 moves from 100 %: a new width on (nearly) every frame from 340 to 1020, no plateaus; 300 % is
+  reached exactly, so no settle afterwards. Pinch ending at about 2.9x: eases to 1020 within about 120 ms of lifting.
+- ctrl + wheel, 60 events of deltaY −4 from 200 %: width grows every frame up to 2720 (800 %; 2·e^2.4 ≈ 22 is clamped).
+- Pinch far past 800 %: width stays below 2992 (8.8 × 340) while the fingers are down, back to 2720 after release.
+- Buttons / keys: about 11 frames per step (180 ms) ending exactly on 510 / 680 / 1020 …; 符合視窗, 0 and double tap
+  about 14 frames (220 ms). With `prefers-reduced-motion: reduce` emulated: one-frame jumps.
+- Frame gaps while pinching on a 4x throttled CPU (the canvas column now re-renders on every frame of a zoom).
+- By eye: crisp pixels at 100 / 200 / 300 %, uneven pixel widths at fractional zooms (expected with nearest-neighbour),
+  smooth scaling below 100 % on a 1x screen, rulers at 25 / 33 / 67 / 150 %, grid lines at fractional zooms, a page
+  wider than the phone (480×270) fitting at about 72 %.
+
+### Stage G: left rough
+
+- Fractional zooms >= 100 % that are not near a whole zoom (the 150 % stop, a pinch left at 240 %) have uneven pixel
+  widths; grid lines are drawn at fractional positions there.
+- A mouse that reports small pixel deltas instead of notches (some macOS setups) is treated like trackpad scrolling
+  and zooms slowly (about 1 % per 4 px); not measured.
+- The zoom readout is `aria-live` and changes on every frame of an animation.
+- No fling / inertia after a pan or pinch.
+
 
 ## Stage F: what changed
 
@@ -32,7 +141,7 @@ manipulation`; `overscroll-behavior: none` on html/body.
 mouse/pen. One finger: tap selects (tap on empty space deselects), drag on an element moves it (8 px tap slop, snapping
 as before, one undo step), drag on a handle resizes, drag on empty space pans; double tap on empty space = fit, double
 tap on an element = edit its text (opens 屬性). Two fingers: pinch zoom around the midpoint (whole zoom steps, clamped
-1-8) plus two-finger pan in one formula; a second finger cancels a move/resize in progress (`store.cancelGesture`: back
+1-8; Stage G: continuous) plus two-finger pan in one formula; a second finger cancels a move/resize in progress (`store.cancelGesture`: back
 to the gesture snapshot, no history entry); remaining fingers are ignored until all are lifted. Mouse/pen unchanged
 (marquee, Space / middle-button pan, Shift/Cmd/Ctrl additive, wheel zoom). Long press does not open the browser menu
 (contextmenu prevented for touch, `-webkit-touch-callout: none`). `(pointer: coarse)`: handles get a 28 px hit area
@@ -94,7 +203,8 @@ on the confirm text, `px-4` on the empty-page hint); number inputs have `inputmo
 - Nudge step cycles 1 → 8 → 16 px per tap (keyboard keeps 1 / Shift 8).
 - 多選: a tap toggles; dragging a selected element moves the whole selection; tap on empty space still deselects all;
   多選 turns off when the selection becomes empty or the touch UI goes away.
-- Pinch zoom snaps to whole zoom levels (the editor only uses integer zoom: square pixels, rulers, grid).
+- Pinch zoom snaps to whole zoom levels (the editor only uses integer zoom: square pixels, rulers, grid). Replaced in
+  Stage G: continuous zoom that settles on a whole zoom within 5 %.
 - A touch on an element selects it at once (like mouse down), so a pinch that starts on an element selects it.
 - Game preview: long press (400 ms) for the tooltip, not the first tap; a tap is always the click, as in the game.
 - Compact dialogs: natural height up to the screen (export / templates nearly full height, confirm stays short).
@@ -129,7 +239,7 @@ Emulated 390x844 @3x, 844x390, 768x1024, 1024x768, 320x568 with touch (`pointer:
 - Touch targets: nothing below 40 px except the opacity slider track (16 px); all text inputs are 16 px in compact.
 - Bug found and fixed: the template gallery cards were squeezed to ~99 px in the phone sheet so the names and
   descriptions were clipped (grid rows may shrink below the content of an `overflow-hidden` card); `auto-rows-max` fixes it.
-- Remaining small gaps: the page cannot be zoomed below 100%, so a page wider than the screen (e.g. 480x270 on a
+- Remaining small gaps: the page cannot be zoomed below 100% (fixed in Stage G: down to 25 %), so a page wider than the screen (e.g. 480x270 on a
   phone) has to be panned; the multi-selection hint in 屬性 still talks about the top toolbar and Shift/arrow keys;
   at 320 px wide the project name field is hidden.
 
@@ -188,7 +298,7 @@ npm install
 npm run dev            # editor at http://localhost:3737 (匯出 button opens the Export dialog)
 npm run lint           # eslint
 npm run typecheck      # tsc --noEmit, strict
-npm test               # vitest: 135 tests, ~4 s
+npm test               # vitest: 161 tests, ~5 s
 npm run build          # production build
 npm run demo:export -- --mode both --autotest                    # trigger mode (default) -> exports/demo/ + HANDOFF.md
 npm run demo:export -- --mode both --autotest --commands direct --out exports/direct   # Stage B behaviour
@@ -198,8 +308,10 @@ npm run preview:skins  # PNG previews of templates/icons/game mock -> exports/pr
 Phone check (Hermes): any browser's device mode, e.g. 390x844, 844x390, 768x1024 with touch emulation, and 1024x768;
 `[data-layout]` on the editor root tells the tier.
 
-Last run (Stage F): `npm run lint`, `npm run typecheck`, `npm test` (135/135) and `npm run build` all exit 0. Demo export
+Last run (Stage G): `npm run lint`, `npm run typecheck`, `npm test` (161/161) and `npm run build` all exit 0. Demo export
 not re-run (exporter, renderer and data model untouched; the golden export tests pass).
+
+Last run (Stage F): `npm run lint`, `npm run typecheck`, `npm test` (135/135) and `npm run build` all exit 0.
 
 Last run (Stage C/D): lint ✓, typecheck ✓, test ✓ (96/96), build ✓, demo export ✓ (0.7 s; two runs give identical
 SHA-1 for all six zips and the READMEs). `--commands direct` reproduces the Stage B demo zips byte for byte (resource
