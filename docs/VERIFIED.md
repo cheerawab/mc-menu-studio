@@ -205,7 +205,8 @@ VERIFIED in the real game:
 - Page 1012 px wide in an 853 px GUI: starts at the same 16 px left margin and is cropped on the RIGHT only (not centred), no garbling,
   tooltip still works.
 - Hover from the parked cursor works again (tooltips "麵包 ×12", "821x396（頁面中央）").
-EXPLANATION (DECOMPILED + offline simulation of the text splitter over the exported function files reproduces 45 / 45 / 46 lines):
+EXPLANATION (DECOMPILED + offline simulation of the text splitter over the exported function files; splitting at W gives 45 / 46 / 47 lines =
+exactly the observed no-scroll / ~422 px / ~431 px, splitting at the render width W + 4 would give 45 / 45 / 46 and does NOT match):
 - `FocusableTextWidget.updateHeight()` counts lines with `font.split(message, super.getWidth())`, and `MultiLineTextWidget.getWidth()` is the
   width of the WIDEST LINE (= W, the final cursor of our first line), not the widget's max width. Rendering still wraps at W + 4 (width - 8).
 - Our first line's running advance peaks at W + 1 whenever a row ends with a tile whose right-most column is opaque (picture touches its
