@@ -7,7 +7,9 @@ import { getSkin } from '@/core/skins';
 import { blankProject, TEMPLATES, type TemplateInfo } from '@/core/templates';
 import { renderEnv } from '../state/images';
 import { editor, useEditor } from '../state/store';
+import { useLayout } from './layoutTier';
 import { Modal } from './Overlays';
+import { cx } from './ui';
 
 function thumbnail(t: TemplateInfo): string | null {
   try {
@@ -36,10 +38,11 @@ function applyTemplate(t: TemplateInfo | null) {
 export default function TemplatesDialog() {
   const open = useEditor((s) => s.dialog === 'templates');
   const thumbs = useMemo(() => (open ? TEMPLATES.map(thumbnail) : []), [open]);
+  const compact = useLayout().tier === 'compact';
   if (!open) return null;
   return (
     <Modal title="範本庫" onClose={() => editor().openDialog(null)} width={880}>
-      <div className="grid grid-cols-3 gap-3 overflow-y-auto p-4">
+      <div className={cx('grid overflow-y-auto', compact ? 'grid-cols-1 gap-2.5 p-3 min-[600px]:grid-cols-2' : 'grid-cols-3 gap-3 p-4')}>
         {TEMPLATES.map((t, i) => (
           <button
             key={t.id}
@@ -47,7 +50,7 @@ export default function TemplatesDialog() {
             onClick={() => applyTemplate(t)}
             className="group flex flex-col overflow-hidden rounded-lg border border-ink-700 bg-ink-850 text-left transition-colors hover:border-accent/60"
           >
-            <div className="stage-bg flex h-40 items-center justify-center p-3">
+            <div className={cx('stage-bg flex items-center justify-center p-3', compact ? 'h-32' : 'h-40')}>
               {thumbs[i] ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={thumbs[i]!} alt={`${t.name} 預覽`} className="pixelated max-h-full max-w-full drop-shadow-[0_6px_16px_rgba(0,0,0,0.5)]" />
@@ -65,9 +68,13 @@ export default function TemplatesDialog() {
           </button>
         ))}
       </div>
-      <div className="flex items-center justify-between border-t border-line px-4 py-3">
+      <div className={cx('flex items-center justify-between border-t border-line px-4 py-3', compact && 'flex-wrap gap-2')}>
         <p className="text-[11.5px] text-fg-dim">範本中的指令都是無害的示範（例如 /time set day），請依伺服器需求修改。</p>
-        <button type="button" onClick={() => applyTemplate(null)} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12.5px] text-fg-muted hover:bg-ink-750 hover:text-fg">
+        <button
+          type="button"
+          onClick={() => applyTemplate(null)}
+          className={cx('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12.5px] text-fg-muted hover:bg-ink-750 hover:text-fg', compact && 'min-h-11')}
+        >
           <FilePlus size={14} /> 空白專案
         </button>
       </div>

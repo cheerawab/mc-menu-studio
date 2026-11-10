@@ -13,6 +13,7 @@ import { fileToAsset, IMAGE_ACCEPT } from '../state/persistence';
 import { currentPage, editor, useEditor } from '../state/store';
 import { ELEMENT_ICON } from './elementMeta';
 import { iconDataUrl } from './iconImages';
+import { useLayout } from './layoutTier';
 import { Button, ColorInput, cx, Field, IconButton, NumberInput, Section, Segmented, Select, TextArea, TextInput, Toggle } from './ui';
 
 type Patch = Partial<Element>;
@@ -537,6 +538,7 @@ function PageInspector({ page }: { page: Page }) {
   const bytes = assetBytes(project);
   const nAssets = Object.keys(project.assets).length;
   const unused = nAssets - usedAssetIds(project).size;
+  const { touchUi } = useLayout();
   return (
     <div>
       <Section title="頁面">
@@ -602,7 +604,23 @@ function PageInspector({ page }: { page: Page }) {
           </div>
         </div>
       </Section>
-      <Section title="快速鍵">
+      {touchUi && (
+        <Section title="觸控操作">
+          <ul className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11.5px] text-fg-dim">
+            {[
+              ['一指拖曳元件', '移動（也可以拖曳四周的控點改變大小）'], ['一指拖曳空白處', '平移畫布'], ['兩指開合', '縮放'],
+              ['兩指拖曳', '平移畫布'], ['點兩下空白處', '符合視窗'], ['點兩下元件', '編輯文字'],
+              ['選取工具列', '逐格移動、複製、刪除、圖層順序、多選'], ['遊戲預覽', '點一下模擬點擊，長按看提示文字'],
+            ].map(([k, v]) => (
+              <li key={k} className="contents">
+                <span className="text-fg-muted">{k}</span>
+                <span>{v}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+      {!touchUi && <Section title="快速鍵">
         <ul className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11.5px] text-fg-dim">
           {[
             ['方向鍵', '移動 1 px（Shift 8 px）'], ['空白鍵＋拖曳', '平移畫布'], ['滾輪', '縮放'], ['⌘/Ctrl＋Z', '復原'],
@@ -615,7 +633,7 @@ function PageInspector({ page }: { page: Page }) {
             </li>
           ))}
         </ul>
-      </Section>
+      </Section>}
     </div>
   );
 }

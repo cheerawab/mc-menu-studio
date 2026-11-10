@@ -12,6 +12,7 @@ import { countIssues, type Issue } from '@/core/model/validate';
 import type { Project } from '@/core/model/types';
 import { renderEnv, whenImagesReady } from '../state/images';
 import { editor, useEditor } from '../state/store';
+import { useLayout } from './layoutTier';
 import { Modal } from './Overlays';
 import { Button, cx, Field, Section, Segmented, Select, TextInput, Toggle } from './ui';
 
@@ -132,6 +133,7 @@ function Steps({ items }: { items: ReactNode[] }) {
 const Cmd = ({ children }: { children: ReactNode }) => <code className="rounded bg-ink-800 px-1 font-mono text-[11.5px] text-fg">{children}</code>;
 
 function ExportBody() {
+  const compact = useLayout().tier === 'compact';
   const project = useEditor((s) => s.project);
   const guiScale = useEditor((s) => s.view.guiScale);
   const windowId = useEditor((s) => s.view.windowId);
@@ -225,10 +227,11 @@ function ExportBody() {
 
   return (
     <div className="flex min-h-0 flex-col">
-      <div className="grid min-h-0 flex-1 grid-cols-[1.15fr_1fr] overflow-y-auto">
-        <div className="border-r border-line">
+      {/* compact: one column (settings, checks + download, install steps) */}
+      <div className={compact ? 'flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain' : 'grid min-h-0 flex-1 grid-cols-[1.15fr_1fr] overflow-y-auto'}>
+        <div className={compact ? 'border-b border-line' : 'border-r border-line'}>
           <Section title="基本設定">
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className={compact ? 'grid grid-cols-1 gap-2.5' : 'grid grid-cols-2 gap-2.5'}>
               <Field label="選單名稱（顯示在遊戲的資源包清單）">
                 <TextInput ariaLabel="選單名稱" value={project.name} maxLength={60} onChange={(v) => editor().commit((p) => ({ ...p, name: v }), { key: 'project-name' })} />
               </Field>
@@ -360,7 +363,7 @@ function ExportBody() {
           </Section>
         </div>
 
-        <div className="col-span-2 border-t border-line">
+        <div className={compact ? 'border-t border-line' : 'col-span-2 border-t border-line'}>
           <Section
             title="安裝步驟"
             actions={

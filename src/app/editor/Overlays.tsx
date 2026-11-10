@@ -3,6 +3,7 @@
 import { CircleCheck, CircleExclamationPoint, Info, TriangleExclamationPoint, X } from 'lucide-react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { editor, useEditor, type Toast } from '../state/store';
+import { useLayout } from './layoutTier';
 import { Button, cx, IconButton } from './ui';
 
 const TOAST_ICON = { info: Info, success: CircleCheck, warning: TriangleExclamationPoint, error: CircleExclamationPoint };
@@ -28,15 +29,28 @@ function ToastItem({ t }: { t: Toast }) {
 
 export function Toasts() {
   const toasts = useEditor((s) => s.toasts);
+  // compact: under the top bar, so they do not cover the tab bar and the selection bar
+  const compact = useLayout().tier === 'compact';
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-5 z-50 flex flex-col items-center gap-2" aria-live="polite">
+    <div
+      className={cx('pointer-events-none fixed inset-x-0 z-50 flex flex-col items-center gap-2', compact ? 'toast-top px-2' : 'bottom-5')}
+      aria-live="polite"
+    >
       {toasts.map((t) => <ToastItem key={t.id} t={t} />)}
     </div>
   );
 }
 
+/**
+ * Dialog. Desktop / medium: centred window. Compact: a sheet from the bottom edge, full width, at most the screen
+ * height (long dialogs are nearly full height, short ones like confirmations stay short); the content scrolls.
+ * The backdrop closes it when a pointer goes down and comes up on the backdrop itself (closing on the click, not on
+ * pointerdown, so the tap cannot land on the editor underneath).
+ */
 export function Modal({ title, onClose, children, width = 440 }: { title: string; onClose: () => void; children: ReactNode; width?: number }) {
   const ref = useRef<HTMLDivElement>(null);
+  const downOnBackdrop = useRef(false);
+  const compact = useLayout().tier === 'compact';
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const first = ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current?.querySelector<HTMLElement>('button');
@@ -54,12 +68,31 @@ export function Modal({ title, onClose, children, width = 440 }: { title: string
     };
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-6 backdrop-blur-[2px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-modal aria-label={title} className="flex max-h-full flex-col rounded-xl border border-ink-700 bg-ink-900 shadow-2xl shadow-black/60" style={{ width }}>
-        <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <h2 className="text-[14px] font-semibold">{title}</h2>
-          <IconButton label="關閉" size="sm" onClick={onClose}>
-            <X size={15} />
+    <div
+      className={cx('fixed inset-0 z-40 flex justify-center bg-black/55', compact ? 'items-end' : 'items-center p-6 backdrop-blur-[2px]')}
+      onPointerDown={(e) => {
+        downOnBackdrop.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && downOnBackdrop.current) onClose();
+        downOnBackdrop.current = false;
+      }}
+    >
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal
+        aria-label={title}
+        className={cx(
+          'flex flex-col bg-ink-900 shadow-2xl shadow-black/60',
+          compact ? 'animate-sheet safe-bottom safe-x sheet-max-h w-full rounded-t-xl border-t border-ink-700' : 'max-h-full rounded-xl border border-ink-700',
+        )}
+        style={compact ? undefined : { width }}
+      >
+        <div className={cx('flex shrink-0 items-center justify-between border-b border-line', compact ? 'min-h-12 gap-2 pr-1 pl-4' : 'px-4 py-3')}>
+          <h2 className={cx('font-semibold', compact ? 'text-[16px]' : 'text-[14px]')}>{title}</h2>
+          <IconButton label="關閉" size={compact ? 'lg' : 'sm'} onClick={onClose}>
+            <X size={compact ? 20 : 15} />
           </IconButton>
         </div>
         {children}
@@ -70,12 +103,13 @@ export function Modal({ title, onClose, children, width = 440 }: { title: string
 
 export function ConfirmDialog() {
   const req = useEditor((s) => s.confirm);
+  const compact = useLayout().tier === 'compact';
   if (!req) return null;
   const close = () => editor().closeConfirm();
   return (
     <Modal title={req.title} onClose={close}>
-      <p className="px-4 py-4 text-[13px] leading-relaxed text-fg-muted">{req.message}</p>
-      <div className="flex justify-end gap-2 border-t border-line px-4 py-3">
+      <p className="min-h-0 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed text-fg-muted">{req.message}</p>
+      <div className={cx('border-t border-line px-4 py-3', compact ? 'grid grid-cols-2 gap-2' : 'flex justify-end gap-2')}>
         <Button variant="ghost" onClick={close}>取消</Button>
         <Button
           data-autofocus

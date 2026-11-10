@@ -162,3 +162,11 @@ input[type="number"] {
     animation: none;
   }
 }
+
+/* compact dialogs open from the bottom edge and never go under the status bar / notch */
+.sheet-max-h {
+  max-height: calc(100% - max(12px, env(safe-area-inset-top)));
+}
+.toast-top {
+  top: calc(env(safe-area-inset-top) + 56px);
+}

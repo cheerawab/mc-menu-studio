@@ -10,6 +10,12 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: '#0b0c10',
   colorScheme: 'dark',
+  width: 'device-width',
+  initialScale: 1,
+  // draw under notches / the home indicator; the top bar, tab bar and sheets add env(safe-area-inset-*) padding
+  viewportFit: 'cover',
+  // Android Chrome: the on-screen keyboard shrinks the layout (100dvh), so sheets and dialogs stay above it
+  interactiveWidget: 'resizes-content',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
