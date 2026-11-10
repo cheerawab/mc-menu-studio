@@ -2,7 +2,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createCanvas, type Canvas } from '@napi-rs/canvas';
-import { buildExport, zipExport } from '../src/core/export';
+import { buildExport, zipExport, type ExportBuild } from '../src/core/export';
 import type { ExportPage, ExportRegion } from '../src/core/export/types';
 import { circleRegions, type Built } from './sao-art';
 
@@ -22,7 +22,7 @@ export function saoPage(key: string, built: Built, k: number, links: boolean): E
 }
 
 /** Plain test page: 1 px white frame, 16 px grid, coloured corner squares, ruler ticks, big label. Regions: one tooltip box in the middle. */
-export function gridPage(key: string, w: number, h: number, label: string, sub: string): { page: ExportPage; canvas: Canvas } {
+export function gridPage(key: string, w: number, h: number, label: string, sub: string, opts: { transparentRightCol?: boolean } = {}): { page: ExportPage; canvas: Canvas } {
   const canvas = createCanvas(w, h), ctx = canvas.getContext('2d');
   ctx.fillStyle = 'rgba(14,18,28,0.82)'; ctx.fillRect(0, 0, w, h);
   ctx.fillStyle = 'rgba(255,255,255,0.14)';
@@ -37,12 +37,45 @@ export function gridPage(key: string, w: number, h: number, label: string, sub: 
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillStyle = '#ffffff'; ctx.font = `bold ${Math.min(30, Math.floor(h / 4))}px ${FONT}`; ctx.fillText(label, w / 2, h / 2 - 10);
   ctx.fillStyle = '#b9c2d3'; ctx.font = `12px ${FONT}`; ctx.fillText(sub, w / 2, h / 2 + 14);
+  // a fully transparent last column keeps the first text line's running advance at W (docs/VERIFIED.md s17: an opaque right edge costs one extra line)
+  if (opts.transparentRightCol) ctx.clearRect(w - 1, 0, 1, h);
   const img = ctx.getImageData(0, 0, w, h);
   const mid: ExportRegion = { x: Math.floor(w / 2) - 40, y: Math.floor(h / 2) - 20, w: 80, h: 40, action: { type: 'none' }, tooltip: `${label}（頁面中央）` };
   return { page: { key, title: label, footerLabel: '關閉', image: { width: w, height: h, data: img.data }, regions: [mid] }, canvas };
 }
 
-export async function emit(name: string, pages: ExportPage[], previews: [string, Canvas][]) {
+export interface EmitOptions {
+  /** Page keys whose trailing empty-line run loses ONE "\n" (the picture needs ceil(H/9) lines in total, the exporter reserves one more). */
+  trim?: string[];
+  /** Ticks per page of the auto-test instead of 800 (the first page stays at tick 120). */
+  interval?: number;
+}
+
+const utf8d = new TextDecoder(), utf8e = new TextEncoder();
+
+/** Post-processing of the built files for the experiments; the exporter itself is untouched. */
+function patchBuild(build: ExportBuild, o: EmitOptions) {
+  for (const key of o.trim ?? []) {
+    const path = [...build.dataPack.keys()].find((k) => k.endsWith(`/function/show_${key}.mcfunction`));
+    if (!path) throw new Error(`no function file for page ${key}`);
+    const text = utf8d.decode(build.dataPack.get(path)!);
+    const re = /"text":"((?:\\n)+)"/g; // in the file a newline is the two characters backslash + n
+    let last: RegExpExecArray | null = null;
+    for (let m: RegExpExecArray | null; (m = re.exec(text)); ) last = m;
+    if (!last) throw new Error(`no newline run in ${path}`);
+    const run = last[1];
+    const patched = text.slice(0, last.index) + `"text":"${run.slice(2)}"` + text.slice(last.index + last[0].length);
+    build.dataPack.set(path, utf8e.encode(patched));
+    console.log(`  trim ${key}: ${run.length / 2} -> ${run.length / 2 - 1} newlines`);
+  }
+  if (o.interval && build.autotest) {
+    const path = [...build.autotest.keys()].find((k) => k.endsWith('/function/tick.mcfunction'))!;
+    const text = utf8d.decode(build.autotest.get(path)!).replace(/mcms_t=(\d+)/g, (_m, v) => `mcms_t=${120 + Math.round(((Number(v) - 120) * o.interval!) / 800)}`);
+    build.autotest.set(path, utf8e.encode(text));
+  }
+}
+
+export async function emit(name: string, pages: ExportPage[], previews: [string, Canvas][], opts: EmitOptions = {}) {
   const base = join(OUT, name);
   mkdirSync(join(base, 'previews'), { recursive: true });
   for (const [n, c] of previews) writeFileSync(join(base, 'previews', `${n}.png`), c.toBuffer('image/png'));
@@ -50,6 +83,7 @@ export async function emit(name: string, pages: ExportPage[], previews: [string,
     namespace: 'size_poc', packName: `Size PoC ${name}`, mode: 'functions', quickActions: false,
     afterAction: 'close', autotest: true, commandMode: 'trigger',
   }, { resourcePack: 'resourcepack.zip', dataPack: 'datapack.zip', autotest: 'autotest.zip' });
+  patchBuild(build, opts);
   const zips = await zipExport(build);
   const dir = join(base, 'functions');
   mkdirSync(dir, { recursive: true });

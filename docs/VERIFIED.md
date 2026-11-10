@@ -221,3 +221,27 @@ OFFLINE CODEC CHECK (Mojang's own Dialog codec via DialogCheck): `plain_message.
 widest possible picture is 1024 - 12 = 1012 px.
 NOT RUN: GUI scale 2 (GUI 1280x720, predicted largest 1012 x 630 / 621 when touching the right edge) and the "frame page first" order test.
 The second launch of this session was held back by the approval prompt (no answer after 5 minutes) and was not retried.
+
+## 18. LARGEST PAGE ON A 1920x1080 SCREEN, DEFAULT GUI SCALE (real game; model confirmed at a second screen height)
+Setup: Prism window 960x540 pt on a Retina Mac = 1920x1080 framebuffer px (the client only looks at framebuffer px), `guiScale:0` (auto).
+Auto picked scale 4: GUI 480x270 (measured: 1568 screenshot px / 480 = 3.267 px per GUI px, title bar 46 px, 882 px of content = 270 GUI px).
+`scripts/max1080-poc.ts` (set `m1080`); screenshots `exports/screenshots/15..17`. Offline prediction first (`split_sim.py`, S = 270), then the game:
+| page | size | trailing newlines | predicted | measured in game |
+|------|------|-------------------|-----------|------------------|
+| max_items (SAO)  | 448x180 | as exported | fits, top 44 | fits, no scrollbar |
+| max_trim (SAO)   | 448x189 | one fewer   | fits         | fits, no scrollbar, complete to the bottom row |
+| trim_frame       | 448x189 (last column transparent) | one fewer | fits, frame y 44..232 | no scrollbar, frame y 44.1..232.0, x from 16.2 |
+| over198          | 448x198 | one fewer   | scrolls (206 > 204) | scrollbar (thumb y 33..229), frame top 37.0 |
+| plain189         | 448x189 (last column transparent) | as exported | scrolls (206 > 204) | scrollbar, frame top 37.0 |
+All five match. So: at GUI height S the widget fits iff `8 + 9 * lines <= S - 66`; the container top is `min(63, S - 33 - h)` (44 - 4 = 40 here;
+37 - 4 = 33 when it scrolls). The extra newline is real (plain189 scrolls, trim_frame does not).
+Largest page without scrolling, window 1920x1080 (W <= GUI width - 32 and <= 1012; lines_max = floor((S - 74) / 9)):
+| GUI scale | GUI px | now (right edge transparent / opaque) | one newline fewer (transparent / opaque) | share of screen (trimmed) |
+|---|---|---|---|---|
+| 4 (auto)  | 480x270   | 448x180 / 448x171   | 448x189 / 448x180   | 93% x 70% (VERIFIED game: 189 yes, 198 no) |
+| 3         | 640x360   | 608x270 / 608x261   | 608x279 / 608x270   | 95% x 78% (computed) |
+| 2         | 960x540   | 928x450 / 928x441   | 928x459 / 928x450   | 97% x 85% (computed) |
+| 1         | 1920x1080 | 1012x990 / 1012x981 | 1012x999 / 1012x990 | 53% x 92% (computed; width capped by the 1024 field limit) |
+Only S = 480 (853x480, section 17) and S = 270 are verified in the game; the other rows follow the same formula. NOT TESTED: y offsets above 384
+(m1280 and the scale 1/2/3 rows need offsets up to ~990), an opaque right edge at S = 270, the exporter change itself (it still emits the extra line:
+`layout.ts` lines = ceil(H/9); fix = ceil(H/9) - 1 and, when the first line peaks at W + 1, end the line at W + 1 (one transparent column)).

@@ -168,3 +168,9 @@ All exporter numbers are in `src/core/export/constants.ts`; mock metrics in `GAM
 - 597x336 (70% x 70% of a 853x480 GUI) verified in game. For smaller GUIs (1080p "auto" = 480x270) the usable height is about
   `9 * floor((S - 83) / 9)` (180 at S = 270) per the decompiled layout code; not yet run. The editor's mock (`gameLayout.widgetSpace = S - 100`)
   is more pessimistic than that and should be re-calibrated after the in-game check. The exporter reserves one empty line (9 px) too many.
+
+## Largest page at 1920x1080 (Hermes, docs/VERIFIED.md section 18)
+- GUI 480x270 (auto scale 4): 448x189 fits without scrolling (93% x 70%) IF the exporter reserved one line fewer; today's export reaches 448x180
+  (448x171 when the page touches its right edge). Verified in the game with post-processed packs (`scripts/max1080-poc.ts`); the exporter is NOT changed yet.
+- To change in the exporter: `layout.ts` `lines: ceil(H/9)` -> `ceil(H/9) - 1`, and end the first line at W + 1 when its running advance peaks at W + 1
+  (otherwise the widget height pass wraps the line and adds a line). Goldens (`export-golden.test.ts`, exports/demo) must be regenerated.
