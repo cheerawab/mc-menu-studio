@@ -22,6 +22,9 @@ export interface ReadmeInfo {
   commandMode: CommandMode;
   /** Trigger mode: objective and id table; null in direct mode. */
   triggers: TriggerTable | null;
+  /** Render scale (texels per GUI px) and tile size in GUI px of the pictures. */
+  scale: number;
+  tileSize: number;
   pages: { key: string; title: string; footerLabel: string }[];
   files: { resourcePack: string; dataPack: string };
   hasCommands: boolean;
@@ -37,6 +40,30 @@ export function triggerRowText(a: TriggerAction): string {
   const what =
     a.kind === 'command' ? `執行指令 /${a.command}` : a.kind === 'close' ? `關閉選單（/${a.command}）` : `切換頁面 → ${a.target}（/${a.command}）`;
   return `${a.id}：${what}${a.footerOnly ? '（下方按鈕）' : `（第一次出現：${a.firstPage}）`}`;
+}
+
+/**
+ * resourcepack.zip of the built-in demo (`npm run demo:export -- --scale N`, 9 pages: calibration + every template),
+ * in KB, measured at Stage H (91,093 / 454,118 / 683,076 / 910,498 bytes). Growth is not exactly scale^2: 2x is 5x
+ * the size because small text becomes anti-aliased (1x pixelates it), 3x / 4x compress their flat areas better.
+ */
+export const DEMO_PACK_KB: Readonly<Record<1 | 2 | 3 | 4, number>> = { 1: 89, 2: 443, 3: 667, 4: 889 };
+
+/** "5", "7.5", "10": size of the demo pack at `scale` relative to 1x, to the nearest half. */
+export const demoPackRatio = (scale: 1 | 2 | 3 | 4): string => String(Math.round((DEMO_PACK_KB[scale] / DEMO_PACK_KB[1]) * 2) / 2);
+
+/** The 文字清晰度 paragraph of the README (also used by the docs). */
+export function resolutionLines(scale: number, tileSize: number): string[] {
+  const kb = DEMO_PACK_KB;
+  return [
+    '【文字清晰度（解析度）】',
+    `- 這次匯出使用 ${scale}x：每個介面像素用 ${scale}×${scale} 個材質像素繪製（圖塊 ${tileSize} px，字型格 ${tileSize * scale}×${tileSize * scale}）。`,
+    '- 「遊戲介面大小 ÷ 解析度」是整數時最清楚（每個材質像素剛好佔整數個螢幕像素）：',
+    '  介面大小 2 → 2x、介面大小 3 → 3x、介面大小 4 → 4x 或 2x。',
+    '- 解析度高於玩家的介面大小時，遊戲會略過部分像素：邊緣變得鋸齒，細的筆畫可能消失。',
+    `- 解析度越高，資源包越大（內建範例實測：1x ${kb[1]} KB、2x ${kb[2]} KB（約 ${demoPackRatio(2)} 倍）、` +
+      `3x ${kb[3]} KB（約 ${demoPackRatio(3)} 倍）、4x ${kb[4]} KB（約 ${demoPackRatio(4)} 倍））。`,
+  ];
 }
 
 export function readmeText(i: ReadmeInfo): string {
@@ -120,6 +147,7 @@ export function readmeText(i: ReadmeInfo): string {
       `  （記錄檔會出現 Failed to load function ${ns}:${TRIGGER_FUNCTIONS.tick}）；請先在遊戲裡手動試過每個指令。`,
     );
   }
+  add('', ...resolutionLines(i.scale, i.tileSize));
   add(
     '',
     '【限制與注意事項】',

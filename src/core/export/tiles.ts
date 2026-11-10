@@ -1,11 +1,12 @@
 // Splits page pictures into square tiles, skips empty ones and dedupes identical tiles across all pages.
-import { DEFAULT_TILE_SIZE, MAX_CELL, MIN_TILE_SIZE } from './constants';
+// Pictures are in texels (page px x scale); a tile is T page px = T * scale texels per side.
+import { DEFAULT_TILE_SIZE, MAX_CELL, MAX_CELL_TEXELS, MIN_TILE_SIZE } from './constants';
 import type { RgbaImage } from './types';
 
 export interface TileGlyph {
-  /** size x size x 4 bytes; fully transparent pixels are normalised to 0,0,0,0. */
+  /** cell x cell x 4 bytes (cell = size * scale texels); fully transparent pixels are normalised to 0,0,0,0. */
   pixels: Uint8Array;
-  /** Rightmost column with alpha > 0, + 1 (what the client measures for the advance). */
+  /** Rightmost column with alpha > 0, + 1, in texels (what the client measures for the advance). */
   actualWidth: number;
 }
 
@@ -37,25 +38,38 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-export function checkTileSize(size: number): void {
+export function checkTileSize(size: number, scale = 1): void {
   if (!Number.isInteger(size) || size < MIN_TILE_SIZE || size > MAX_CELL)
     throw new Error(`tile size must be an integer ${MIN_TILE_SIZE}..${MAX_CELL}, got ${size}`);
+  if (!Number.isInteger(scale) || scale < 1) throw new Error(`scale must be a positive integer, got ${scale}`);
+  if (size * scale > MAX_CELL_TEXELS) throw new Error(`tile cell ${size} x ${scale} = ${size * scale} texels exceeds ${MAX_CELL_TEXELS}`);
 }
 
 /** Collects unique tiles over any number of pictures. Order of `tiles` = order of first appearance (deterministic). */
 export class TileSet {
   readonly tiles: TileGlyph[] = [];
+  /** Texels per side of a cell. */
+  readonly cell: number;
   private readonly buckets = new Map<number, number[]>();
 
-  constructor(readonly size = DEFAULT_TILE_SIZE) {
-    checkTileSize(size);
+  /** `size` in page px, `scale` texels per page px. */
+  constructor(
+    readonly size = DEFAULT_TILE_SIZE,
+    readonly scale = 1,
+  ) {
+    checkTileSize(size, scale);
+    this.cell = size * scale;
   }
 
-  /** Raster order (rows top to bottom, left to right). Partial edge tiles are padded with transparent pixels. */
+  /**
+   * `img` in texels (a multiple of `scale` on both axes). Raster order (rows top to bottom, left to right); placements
+   * in page px. Partial edge tiles are padded with transparent pixels.
+   */
   add(img: RgbaImage): { placed: PlacedTile[]; empty: number } {
-    const S = this.size;
+    const S = this.cell, k = this.scale;
     const { width: W, height: H, data } = img;
     if (data.length !== W * H * 4) throw new Error('picture buffer has the wrong length');
+    if (W % k || H % k) throw new Error(`picture ${W}x${H} is not a multiple of the scale ${k}`);
     const placed: PlacedTile[] = [];
     let empty = 0;
     for (let ty = 0; ty < H; ty += S) {
@@ -79,7 +93,7 @@ export class TileSet {
           empty++;
           continue;
         }
-        placed.push({ x: tx, y: ty, tile: this.intern(cell) });
+        placed.push({ x: tx / k, y: ty / k, tile: this.intern(cell) });
       }
     }
     return { placed, empty };
@@ -90,7 +104,7 @@ export class TileSet {
     const bucket = this.buckets.get(h);
     if (bucket) for (const i of bucket) if (sameBytes(this.tiles[i].pixels, cell)) return i;
     const index = this.tiles.length;
-    this.tiles.push({ pixels: cell, actualWidth: actualWidth(cell, this.size, this.size) });
+    this.tiles.push({ pixels: cell, actualWidth: actualWidth(cell, this.cell, this.cell) });
     if (bucket) bucket.push(index);
     else this.buckets.set(h, [index]);
     return index;

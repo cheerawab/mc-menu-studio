@@ -1,9 +1,10 @@
 // Project -> exporter input: renders every page with the shared renderer (browser canvas or @napi-rs/canvas),
 // resolves page links to keys, and collects the export checks shown before downloading.
 import { effectiveFooterLabel, isInteractive } from '../model/defaults';
-import type { Action, Page, Project } from '../model/types';
+import type { Action, Page, Project, RenderScale } from '../model/types';
 import { cleanCommand, validateProject, type Issue, type ValidateOptions } from '../model/validate';
 import { renderPageToCanvas } from '../render/renderPage';
+import { canvasPixels, fitsCanvas, MAX_CANVAS_PIXELS } from '../render/scale';
 import type { Ctx2D, RenderEnv } from '../render/types';
 import { MAX_PICTURE_WIDTH } from './constants';
 import { commandText } from './dialogs';
@@ -25,17 +26,28 @@ export function resolveAction(action: Action, project: Project, keyOf: KeyOf = (
   }
 }
 
-/** Renders all pages of a project for export. `keyOf` lets callers rename page keys (links follow). */
-export function exportPagesFromProject(project: Project, env: RenderEnv, keyOf: KeyOf = (p) => p.key): ExportPage[] {
+/**
+ * Renders all pages of a project for export at `scale` texels per page px (default: the project's 解析度; pass the
+ * same value as ExportOptions.scale). `keyOf` lets callers rename page keys (links follow).
+ */
+export function exportPagesFromProject(
+  project: Project,
+  env: RenderEnv,
+  keyOf: KeyOf = (p) => p.key,
+  scale: RenderScale = project.settings.renderScale,
+): ExportPage[] {
   return project.pages.map((page) => {
-    const { canvas, result } = renderPageToCanvas(page, project, env, { placeholders: false });
+    const { canvas, result } = renderPageToCanvas(page, project, env, { placeholders: false, scale });
     const ctx = canvas.getContext('2d') as Ctx2D;
-    const img = ctx.getImageData(0, 0, page.width, page.height);
+    const W = page.width * scale, H = page.height * scale;
+    const img = ctx.getImageData(0, 0, W, H);
     return {
       key: keyOf(page),
       title: page.title,
       footerLabel: effectiveFooterLabel(page, project),
-      image: { width: page.width, height: page.height, data: img.data },
+      image: { width: W, height: H, data: img.data },
+      width: page.width,
+      height: page.height,
       regions: result.regions.map((r) => ({
         x: r.x, y: r.y, w: r.w, h: r.h,
         action: resolveAction(r.action, project, keyOf),
@@ -77,9 +89,17 @@ export function checkExport(project: Project, opts: ExportCheckOptions = {}): Is
   const issues = validateProject(project, opts).filter((i) => !(trigger && i.code === 'command-chat'));
   if (project.namespace === 'minecraft')
     issues.unshift({ severity: 'error', code: 'export-namespace-minecraft', message: '匯出時命名空間不能是 minecraft（會蓋掉遊戲內建的檔案），請改成自己的名稱。' });
-  for (const page of project.pages)
+  const scale = project.settings.renderScale;
+  for (const page of project.pages) {
     if (page.width > MAX_PICTURE_WIDTH)
       issues.unshift({ severity: 'error', code: 'export-width', pageId: page.id, message: `頁面「${page.title || page.key}」寬度超過遊戲上限 ${MAX_PICTURE_WIDTH} px。` });
+    if (!fitsCanvas(page.width, page.height, scale))
+      issues.unshift({
+        severity: 'error', code: 'export-canvas-size', pageId: page.id,
+        message: `頁面「${page.title || page.key}」在 ${scale}x 解析度下是 ${(canvasPixels(page.width, page.height, scale) / 1e6).toFixed(1)} 百萬像素，` +
+          `超過瀏覽器畫布上限（${MAX_CANVAS_PIXELS / 1e6} 百萬像素）。請在「解析度」選擇較低的倍數，或縮小頁面。`,
+      });
+  }
   const n = countCommandActions(project, opts.mode ?? 'registry');
   if (n && trigger)
     issues.push({

@@ -36,6 +36,8 @@ export interface ProjectSettings {
   accent: string | null;
   /** Label of the dialog's footer button (the game's `notice` action), default "關閉". Pages may override it. */
   footerLabel: string;
+  /** Export resolution (解析度), default 2. Also what the editor canvas and the game preview show. */
+  renderScale: RenderScale;
 }
 
 export interface Project {

@@ -155,9 +155,9 @@ function ExportBody() {
   const options = useMemo<ExportOptions>(
     () => ({
       namespace: project.namespace, packName: project.name, mode: prefs.mode, quickActions: prefs.quickActions,
-      afterAction: prefs.afterAction, commandMode: prefs.commandMode,
+      afterAction: prefs.afterAction, commandMode: prefs.commandMode, scale: project.settings.renderScale,
     }),
-    [project.namespace, project.name, prefs],
+    [project.namespace, project.name, project.settings.renderScale, prefs],
   );
 
   useEffect(() => {
@@ -167,7 +167,7 @@ function ExportBody() {
       try {
         await whenImagesReady(project.assets);
         if (cancelled) return;
-        const pages = exportPagesFromProject(project, renderEnv(project.assets));
+        const pages = exportPagesFromProject(project, renderEnv(project.assets), undefined, options.scale);
         const build = buildExport(pages, options);
         const zips = await zipExport(build);
         if (!cancelled) setBuilt({ project, options, build, zips });

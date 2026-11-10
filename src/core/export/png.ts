@@ -55,21 +55,27 @@ export function encodePng(width: number, height: number, rgba: ArrayLike<number>
   const cand = new Uint8Array(stride);
   for (let y = 0; y < height; y++) {
     const row = y * stride, prev = row - stride;
-    let bestType = 0, bestSum = Infinity;
-    for (let t = 0; t < 5; t++) {
-      let sum = 0;
-      for (let i = 0; i < stride; i++) {
-        const a = i >= 4 ? rgba[row + i - 4] : 0;
-        const b = y > 0 ? rgba[prev + i] : 0;
-        const c = y > 0 && i >= 4 ? rgba[prev + i - 4] : 0;
-        const v = filterByte(t, rgba[row + i], a, b, c);
-        sum += v < 128 ? v : 256 - v;
-      }
-      if (sum < bestSum) {
-        bestSum = sum;
-        bestType = t;
-      }
+    // the five filter sums in one pass; the first type with the smallest sum wins (classic min-sum heuristic)
+    let s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0;
+    for (let i = 0; i < stride; i++) {
+      const x = rgba[row + i];
+      const a = i >= 4 ? rgba[row + i - 4] : 0;
+      const b = y > 0 ? rgba[prev + i] : 0;
+      const c = y > 0 && i >= 4 ? rgba[prev + i - 4] : 0;
+      let v = x;
+      s0 += v < 128 ? v : 256 - v;
+      v = (x - a) & 0xff;
+      s1 += v < 128 ? v : 256 - v;
+      v = (x - b) & 0xff;
+      s2 += v < 128 ? v : 256 - v;
+      v = (x - ((a + b) >> 1)) & 0xff;
+      s3 += v < 128 ? v : 256 - v;
+      v = (x - paeth(a, b, c)) & 0xff;
+      s4 += v < 128 ? v : 256 - v;
     }
+    const sums = [s0, s1, s2, s3, s4];
+    let bestType = 0;
+    for (let t = 1; t < 5; t++) if (sums[t] < sums[bestType]) bestType = t;
     for (let i = 0; i < stride; i++) {
       const a = i >= 4 ? rgba[row + i - 4] : 0;
       const b = y > 0 ? rgba[prev + i] : 0;

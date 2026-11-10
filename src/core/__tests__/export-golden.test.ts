@@ -1,8 +1,9 @@
 import { createCanvas } from '@napi-rs/canvas';
 import { describe, expect, it } from 'vitest';
 import { buildExport, ExportError, zipExport, type ExportBuild, type ExportMode, type ExportOptions, type ExportPage } from '../export';
-import { CALIBRATION_KEY, calibrationPage } from '../export/calibration';
-import { demoOptions, demoPages } from '../export/demo';
+import { CALIBRATION_KEY, calibrationImage, calibrationPage, upscaleImage } from '../export/calibration';
+import { demoOptions, demoPages, demoScale } from '../export/demo';
+import type { RenderScale } from '../model/types';
 import { clickEvent, hoverEvent } from '../export/dialogs';
 import type { CanvasLike, RenderEnv } from '../render/types';
 import { loadFonts, normalised, simulatePage } from './helpers/clientSim';
@@ -13,6 +14,17 @@ const opts = (mode: ExportMode, extra: Partial<ExportOptions> = {}): ExportOptio
   namespace: 'gold', packName: '黃金測試', mode, quickActions: true, afterAction: 'close', ...extra,
 });
 const dec = (b?: Uint8Array) => new TextDecoder().decode(b);
+
+/** Demo pages rendered once per scale (rendering every template at 4x takes seconds). */
+const demoCache = new Map<number, ExportPage[]>();
+const demoAt = (scale: RenderScale) => {
+  if (!demoCache.has(scale)) demoCache.set(scale, demoPages(makeEnv(), scale));
+  return demoCache.get(scale)!;
+};
+
+/** A synthetic 1x page as the exporter gets it at `scale` (picture upscaled nearest, page size kept). */
+const atScale = (p: ExportPage, scale: number): ExportPage =>
+  scale === 1 ? p : { ...p, image: upscaleImage(p.image, scale), width: p.image.width, height: p.image.height };
 
 function painter(w: number, h: number) {
   const data = new Uint8Array(w * h * 4);
@@ -78,8 +90,8 @@ interface Active {
 
 /** Regions the client should see: clipped, event-less ones dropped, and extended to the baseline (y = 7) if shorter. */
 function activeRegions(page: ExportPage, build: ExportBuild): Active[] {
-  const { namespace: ns, mode } = build.options;
-  const W = page.image.width, H = page.image.height;
+  const { namespace: ns, mode, scale } = build.options;
+  const W = page.width ?? page.image.width / scale, H = page.height ?? page.image.height / scale;
   const out: Active[] = [];
   for (const r of page.regions) {
     const x0 = Math.max(0, r.x), y0 = Math.max(0, r.y), x1 = Math.min(W, r.x + r.w), y1 = Math.min(H, r.y + r.h);
@@ -91,17 +103,22 @@ function activeRegions(page: ExportPage, build: ExportBuild): Active[] {
   return out;
 }
 
-/** Golden check of one page: decode the generated files like the client and compare with the source. */
+/**
+ * Golden check of one page: decode the generated files like the client and compare with the source. Layout in GUI px
+ * (page px), pictures in texels (page px x the export's scale).
+ */
 function assertPage(build: ExportBuild, page: ExportPage) {
-  const W = page.image.width, H = page.image.height;
-  const sim = simulatePage(build, page.key, W, H);
-  const where = `page ${page.key} (${build.options.mode})`;
+  const { scale, tileSize: T } = build.options;
+  const W = page.width ?? page.image.width / scale, H = page.height ?? page.image.height / scale;
+  const sim = simulatePage(build, page.key, W, H, scale);
+  const where = `page ${page.key} (${build.options.mode}, ${scale}x)`;
   expect(sim.messageWidth, where).toBe(W + 12);
-  expect([sim.badStyle, sim.badEventRuns, sim.offLine, sim.outside, sim.overlaps], where).toEqual([0, 0, 0, 0, 0]);
+  expect([sim.badStyle, sim.badEventRuns, sim.offLine, sim.outside, sim.overlaps, sim.badScale], where).toEqual([0, 0, 0, 0, 0, 0]);
   expect(sim.endOfLine, where).toBe(W);
   expect(sim.peak, where).toBeLessThanOrEqual(W + 4);
   expect(sim.newlines, where).toBe(Math.ceil(H / 9));
-  // every tile lands at its source position, pixel for pixel
+  // every tile glyph is drawn at its tile's position (a multiple of T) and lands there pixel for pixel
+  expect(sim.drawn.filter((d) => d.x % T || d.y % T), `${where}: glyphs off the tile grid`).toEqual([]);
   expect(Buffer.from(sim.canvas).equals(Buffer.from(normalised(page.image.data))), `${where}: pixels`).toBe(true);
 
   // every hit glyph box is <= 128 px, and per event the union of boxes equals the union of the regions
@@ -168,6 +185,39 @@ describe('exporter golden client simulation', () => {
     expect(cal.key).toBe(CALIBRATION_KEY);
     expect(cal.hits.filter((h) => h.box.y === 140).map((h) => h.box.w)).toEqual([128, 128]);
     expect(cal.layout.offsets).toEqual([0, 1, 32, 64, 96, 100, 128, 140, 151]);
+  });
+
+  it('calibration page at 3x: the 1x picture upscaled nearest, 24 px tiles of 72 texels, same regions', () => {
+    const page = calibrationPage('menu', 3);
+    expect([page.image.width, page.image.height, page.width, page.height]).toEqual([768, 480, 256, 160]);
+    expect(Buffer.from(page.image.data).equals(Buffer.from(upscaleImage(calibrationImage(), 3).data))).toBe(true);
+    expect(page.regions).toEqual(calibrationPage('menu').regions);
+    const build = buildExport([page, atScale(menuPage(), 3), atScale(secondPage(), 3)], opts('registry', { scale: 3 }));
+    assertPage(build, page);
+    expect(build.stats).toMatchObject({ scale: 3, tileSize: 24, cellTexels: 72 });
+    expect(build.pages[0].hits.filter((h) => h.box.y === 140).map((h) => h.box.w)).toEqual([128, 128]);
+    expect(build.pages[0].layout.offsets).toEqual([0, 1, 24, 48, 72, 96, 100, 120, 140, 144, 151]);
+  });
+
+  it.each([1, 2, 3, 4] as const)('client walk of every demo page at %ix: client advances, glyphs on their tiles, pixel-exact', (scale) => {
+    const pages = demoAt(scale);
+    for (const p of pages) expect([p.image.width, p.image.height], p.key).toEqual([p.width! * scale, p.height! * scale]);
+    const build = buildExport(pages, demoOptions(scale % 2 ? 'functions' : 'registry', false, undefined, scale));
+    expect(build.stats).toMatchObject({ scale, tileSize: [0, 32, 32, 24, 16][scale], cellTexels: [0, 32, 64, 72, 64][scale] });
+    for (const p of pages) assertPage(build, p);
+    expect(build.warnings).toEqual([]);
+  });
+
+  it('the new default (2x, the templates\' own 解析度) survives the round trip in both modes', () => {
+    expect(demoScale()).toBe(2);
+    const pages = demoAt(2);
+    for (const mode of MODES) {
+      const build = buildExport(pages, demoOptions(mode, false, undefined, 2));
+      for (const p of pages) assertPage(build, p);
+      expect(build.warnings).toEqual([]);
+      const font = JSON.parse(dec(build.resourcePack.get('assets/mcms_demo/font/y0.json')));
+      expect(font.providers.filter((p: { file?: string }) => p.file?.includes(':font/tiles_')).every((p: { height: number }) => p.height === 32)).toBe(true);
+    }
   });
 
   it('every template page rendered by the shared renderer survives the round trip (both modes)', () => {

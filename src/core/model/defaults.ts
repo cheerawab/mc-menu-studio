@@ -7,6 +7,7 @@ import type {
   Page,
   Project,
   ProjectSettings,
+  RenderScale,
   SkinId,
 } from './types';
 
@@ -23,6 +24,12 @@ export const DEFAULT_FONT_STACK = '"PingFang TC", "Noto Sans TC", "Microsoft Jhe
 
 /** Default label of the dialog's footer button. */
 export const DEFAULT_FOOTER_LABEL = '關閉';
+
+/**
+ * Default export resolution: 2x. Sharp at the common GUI scales 2 and 4 (whole screen px per texel), still 1.5 px per
+ * texel at GUI 3, and never drops texels unless the GUI scale is 1. Projects saved before Stage H load with it too.
+ */
+export const DEFAULT_RENDER_SCALE: RenderScale = 2;
 
 export const SKIN_IDS: readonly SkinId[] = ['vanilla', 'dark', 'holo', 'parchment'];
 
@@ -56,7 +63,7 @@ export function isInteractive(el: Element): el is InteractiveElement {
 export const NO_ACTION: Action = { type: 'none' };
 
 export function defaultSettings(): ProjectSettings {
-  return { fontFamily: DEFAULT_FONT_STACK, accent: null, footerLabel: DEFAULT_FOOTER_LABEL };
+  return { fontFamily: DEFAULT_FONT_STACK, accent: null, footerLabel: DEFAULT_FOOTER_LABEL, renderScale: DEFAULT_RENDER_SCALE };
 }
 
 type ElementOf<T extends ElementType> = Extract<Element, { type: T }>;

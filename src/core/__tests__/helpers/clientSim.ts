@@ -1,6 +1,9 @@
 // Test-only "client simulation": reads the GENERATED files (font JSON, sheet PNGs, dialog JSON or the SNBT inside the
 // .mcfunction) and lays the text out like the 26.3 client does (docs/VERIFIED.md §1-3, §10-11):
-// - glyph advance = (rightmost column with alpha > 0) + 1, + 1; space glyphs advance by their table value
+// - bitmap provider (DECOMPILED, Stage H facts 1-3): cell = png size / grid (texels), pixelScale = (float) height / cell
+//   height, advance = (int) (0.5 + actualWidth * pixelScale) + 1 with float math (actualWidth = rightmost column with
+//   alpha > 0, + 1, in texels); the quad is cell texels * pixelScale GUI px; cells > 255 texels cannot be stitched
+// - space glyphs advance by their table value
 // - the running advance of the line must never exceed plain_message.width - 8 (else the client wraps)
 // - a bitmap glyph's top = line top + (7 - ascent); its click box is the full cell
 // Nothing here imports the exporter's layout code, so the test checks the output, not the implementation.
@@ -84,11 +87,20 @@ interface SpaceGlyph {
 }
 interface BitmapGlyph {
   kind: 'bitmap';
+  /** Cell size in texels. */
   cellW: number;
   cellH: number;
+  /** Texels per GUI px (cellH / JSON height, an integer here). */
+  perPx: number;
   ascent: number;
   pixels: Uint8Array;
   advance: number;
+}
+
+/** The client's advance (re-implemented from the decompiled source, not imported from the exporter). */
+export function clientAdvance(actualWidth: number, height: number, cellHeight: number): number {
+  const pixelScale = Math.fround(height / cellHeight);
+  return Math.trunc(0.5 + Math.fround(Math.fround(actualWidth) * pixelScale)) + 1;
 }
 type Glyph = SpaceGlyph | BitmapGlyph;
 
@@ -121,9 +133,12 @@ export function loadFonts(build: ExportBuild): Map<string, Map<number, Glyph>> {
         if (rows.some((r) => r.length !== cols)) throw new Error(`${path}: chars grid is not rectangular`);
         const cellW = png.width / cols, cellH = png.height / rows.length;
         if (!Number.isInteger(cellW) || !Number.isInteger(cellH)) throw new Error(`${path}: png size not a multiple of the grid`);
-        if (p.height !== cellH) throw new Error(`${path}: height ${p.height} != cell height ${cellH} (pixelScale must be 1)`);
+        if (cellW > 255 || cellH > 255) throw new Error(`${path}: cell ${cellW}x${cellH} cannot be stitched into a 256x256 atlas`);
+        const height = p.height as number;
+        const perPx = cellH / height;
+        if (!Number.isInteger(perPx) || perPx < 1 || cellW % perPx) throw new Error(`${path}: height ${height} vs cell ${cellW}x${cellH}`);
         const ascent = p.ascent as number;
-        if (ascent > cellH) throw new Error(`${path}: ascent ${ascent} > height ${cellH}`);
+        if (ascent > height) throw new Error(`${path}: ascent ${ascent} > height ${height}`);
         rows.forEach((row, r) =>
           row.forEach((cp, c) => {
             if (cp === 0) return;
@@ -139,7 +154,7 @@ export function loadFonts(build: ExportBuild): Map<string, Map<number, Glyph>> {
               break;
             }
             if (glyphs.has(cp)) throw new Error(`${path}: code point U+${cp.toString(16)} defined twice`);
-            glyphs.set(cp, { kind: 'bitmap', cellW, cellH, ascent, pixels, advance: actual + 1 });
+            glyphs.set(cp, { kind: 'bitmap', cellW, cellH, perPx, ascent, pixels, advance: clientAdvance(actual, height, cellH) });
           }),
         );
       } else throw new Error(`${path}: unexpected provider ${String(p.type)}`);
@@ -174,8 +189,12 @@ export interface SimHit {
 
 export interface SimResult {
   messageWidth: number;
-  /** Picture drawn by the visual glyphs, clipped to w x h (anything drawn outside is reported in `outside`). */
+  /** Picture drawn by the visual glyphs in texels ((w x scale) x (h x scale)); anything outside is in `outside`. */
   canvas: Uint8Array;
+  /** Top-left corner (GUI px) of every visual glyph, in text order. */
+  drawn: { x: number; y: number }[];
+  /** Visual glyphs whose texels per GUI px differ from the expected scale. */
+  badScale: number;
   outside: number;
   overlaps: number;
   hits: SimHit[];
@@ -191,8 +210,11 @@ export interface SimResult {
   badStyle: number;
 }
 
-/** Lays out one page's dialog like the client and returns what it draws and where its click boxes are. */
-export function simulatePage(build: ExportBuild, key: string, w: number, h: number): SimResult {
+/**
+ * Lays out one page's dialog like the client and returns what it draws (at `scale` texels per GUI px) and where its
+ * click boxes are (GUI px).
+ */
+export function simulatePage(build: ExportBuild, key: string, w: number, h: number, scale = 1): SimResult {
   const fonts = loadFonts(build);
   const dialog = readDialog(build, key);
   const body = (dialog.body as Json[])[0] as Record<string, Json>;
@@ -201,9 +223,10 @@ export function simulatePage(build: ExportBuild, key: string, w: number, h: numb
   const textWidth = messageWidth - 8;
   const contents = body.contents as Json[];
   if (contents[0] !== '') throw new Error('first component must be the neutral root ""');
-  const canvas = new Uint8Array(w * h * 4);
+  const CW = w * scale, CH = h * scale;
+  const canvas = new Uint8Array(CW * CH * 4);
   const r: SimResult = {
-    messageWidth, canvas, outside: 0, overlaps: 0, hits: [], peak: 0, endOfLine: -1,
+    messageWidth, canvas, drawn: [], badScale: 0, outside: 0, overlaps: 0, hits: [], peak: 0, endOfLine: -1,
     newlines: 0, offLine: 0, badEventRuns: 0, badStyle: 0,
   };
   let cursor = 0, line = 0;
@@ -228,18 +251,20 @@ export function simulatePage(build: ExportBuild, key: string, w: number, h: numb
         if (line !== 0) r.offLine++;
         const top = line * 9 + (7 - g.ascent);
         if (evented) {
-          r.hits.push({ x: cursor, y: top, w: g.cellW, h: g.cellH, click: comp.click_event, hover: comp.hover_event });
+          r.hits.push({ x: cursor, y: top, w: g.cellW / g.perPx, h: g.cellH / g.perPx, click: comp.click_event, hover: comp.hover_event });
         } else {
+          r.drawn.push({ x: cursor, y: top });
+          if (g.perPx !== scale) r.badScale++;
           for (let j = 0; j < g.cellH; j++)
             for (let i = 0; i < g.cellW; i++) {
               const s = (j * g.cellW + i) * 4;
               if (!g.pixels[s + 3]) continue;
-              const x = cursor + i, y = top + j;
-              if (x < 0 || y < 0 || x >= w || y >= h) {
+              const x = cursor * scale + i, y = top * scale + j;
+              if (x < 0 || y < 0 || x >= CW || y >= CH) {
                 r.outside++;
                 continue;
               }
-              const d = (y * w + x) * 4;
+              const d = (y * CW + x) * 4;
               if (canvas[d + 3]) r.overlaps++;
               canvas.set(g.pixels.subarray(s, s + 4), d);
             }

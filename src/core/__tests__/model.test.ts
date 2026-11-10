@@ -133,6 +133,17 @@ describe('serialisation', () => {
     const odd = normalizeProject({ settings: { footerLabel: 5 }, pages: [{ key: 'a', footerLabel: '   ' }] }).project;
     expect([odd.settings.footerLabel, odd.pages[0].footerLabel]).toEqual(['關閉', null]);
   });
+  it('解析度 (renderScale): default 2, kept on round trips, missing or invalid values load as 2', () => {
+    expect(createProject().settings.renderScale).toBe(2);
+    const p = projectWith(0);
+    p.settings.renderScale = 3;
+    expect(parseProjectJson(serializeProject(p)).project.settings.renderScale).toBe(3);
+    const load = (renderScale: unknown) => normalizeProject({ settings: { renderScale }, pages: [{ key: 'a' }] }).project.settings.renderScale;
+    expect([1, 2, 3, 4].map(load)).toEqual([1, 2, 3, 4]);
+    expect([undefined, 0, 5, 2.5, '3', null, 'x'].map(load)).toEqual([2, 2, 2, 2, 2, 2, 2]);
+    expect(normalizeProject({ pages: [{ key: 'a' }] }).project.settings.renderScale).toBe(2); // no settings at all
+  });
+
   it('resolves the footer label: page override, project default, then 關閉', () => {
     const p = projectWith(0);
     const page = p.pages[0];

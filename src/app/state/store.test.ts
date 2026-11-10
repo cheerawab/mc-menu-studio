@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createElement, createPage, createProject } from '@/core/model/defaults';
 import { updateElements } from '@/core/model/ops';
+import { serializeProject } from '@/core/model/serialize';
 import { TEMPLATES } from '@/core/templates';
 import { loadInitial, PROJECT_KEY, startAutosave } from './persistence';
 import { createEditorStore, currentPage } from './store';
@@ -138,6 +139,19 @@ describe('persistence', () => {
     stop();
     expect(storage.getItem(PROJECT_KEY)).toContain('我的選單');
     expect(loadInitial(storage).project.name).toBe('我的選單');
+  });
+
+  it('a project saved before Stage H (no 解析度) loads at the default 2x; a saved 解析度 is kept', () => {
+    const storage = memoryStorage();
+    const old = JSON.parse(serializeProject(TEMPLATES[0].build()));
+    delete old.project.settings.renderScale;
+    storage.setItem(PROJECT_KEY, JSON.stringify(old));
+    const r = loadInitial(storage);
+    expect(r.project.settings.renderScale).toBe(2);
+    expect(r.messages.filter((m) => m.kind !== 'info')).toEqual([]);
+    old.project.settings.renderScale = 4;
+    storage.setItem(PROJECT_KEY, JSON.stringify(old));
+    expect(loadInitial(storage).project.settings.renderScale).toBe(4);
   });
 
   it('falls back to the sample when saved data is corrupt and reports quota errors', async () => {

@@ -1,5 +1,6 @@
 // Exporter input/output types. The exporter consumes already rendered pages (RGBA + regions), so the same code
 // serves the browser (DOM canvas), Node (@napi-rs/canvas) and synthetic test pictures.
+import type { RenderScale } from '../model/types';
 
 export type ExportMode = 'registry' | 'functions';
 export type AfterAction = 'close' | 'none';
@@ -41,7 +42,12 @@ export interface ExportPage {
   key: string;
   title: string;
   footerLabel: string;
+  /** The picture in texels: page px x the export's `scale` on both axes. */
   image: RgbaImage;
+  /** Page size in page px (= GUI px). Omitted = image size / scale. The exporter checks image = size x scale. */
+  width?: number;
+  height?: number;
+  /** In page px. */
   regions: ExportRegion[];
 }
 
@@ -59,7 +65,12 @@ export interface ExportOptions {
    * before trigger mode existed keep their exact output.
    */
   commandMode?: CommandMode;
-  /** Tile size in px (default 32). */
+  /**
+   * Texels per page px of every page image (1-4, default 1 so callers written before Stage H keep their exact
+   * output). Tile glyph cells get T x scale texels with JSON `height` T; hit glyphs stay 1x.
+   */
+  scale?: RenderScale;
+  /** Tile size in GUI px (default by scale: 1x 32, 2x 32, 3x 24, 4x 16); `tileSize * scale` must be <= 255. */
   tileSize?: number;
   /** Also build the auto-test data pack (Hermes). */
   autotest?: boolean;
@@ -101,7 +112,12 @@ export interface ExportWarning {
 
 export interface ExportStats {
   pages: number;
+  /** Render scale (texels per GUI px) of the tile glyphs. */
+  scale: number;
+  /** Tile size in GUI px. */
   tileSize: number;
+  /** Texels per side of a tile glyph cell (tileSize * scale). */
+  cellTexels: number;
   /** Tiles drawn (after skipping empty ones), over all pages. */
   tilesPlaced: number;
   /** Fully transparent tiles that were skipped. */

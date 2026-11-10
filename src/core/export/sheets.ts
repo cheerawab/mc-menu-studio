@@ -5,8 +5,11 @@ import { encodePng } from './png';
 export interface Sheet {
   /** Texture name: assets/<ns>/textures/font/<name>.png */
   name: string;
+  /** Cell size in texels. */
   cellW: number;
   cellH: number;
+  /** The bitmap provider's `height` in GUI px (tiles: T while cells are T * scale texels; hit glyphs: cellH). */
+  height: number;
   cols: number;
   rows: number;
   /** `chars` rows (equal length in code points, padded with U+0000). */
@@ -46,10 +49,17 @@ export interface Cell {
 }
 
 /**
- * Packs equal-size cells into sheets of at most SHEET_COLUMNS x SHEET_MAX_ROWS. Returns the sheets and, for every
- * input cell, the index of the sheet that holds it.
+ * Packs equal-size cells (texels) into sheets of at most SHEET_COLUMNS x SHEET_MAX_ROWS. `height` = the provider's
+ * GUI height of a cell (default cellH, i.e. 1 texel per GUI px). Returns the sheets and, for every input cell, the
+ * index of the sheet that holds it.
  */
-export function packSheets(prefix: string, cells: Cell[], cellW: number, cellH: number): { sheets: Sheet[]; sheetOf: number[] } {
+export function packSheets(
+  prefix: string,
+  cells: Cell[],
+  cellW: number,
+  cellH: number,
+  height = cellH,
+): { sheets: Sheet[]; sheetOf: number[] } {
   const perSheet = SHEET_COLUMNS * SHEET_MAX_ROWS;
   const sheets: Sheet[] = [];
   const sheetOf: number[] = [];
@@ -81,6 +91,7 @@ export function packSheets(prefix: string, cells: Cell[], cellW: number, cellH: 
       name: `${prefix}_${s}`,
       cellW,
       cellH,
+      height,
       cols,
       rows,
       chars,
@@ -98,12 +109,13 @@ export function hitPixels(w: number, h: number): Uint8Array {
   return px;
 }
 
-/** One single-cell sheet per hit glyph size. */
+/** One single-cell sheet per hit glyph size (always 1 texel per GUI px: hit glyphs are not pictures). */
 export function hitSheet(w: number, h: number, cp: number): Sheet {
   return {
     name: `hit_${w}x${h}`,
     cellW: w,
     cellH: h,
+    height: h,
     cols: 1,
     rows: 1,
     chars: [String.fromCodePoint(cp)],

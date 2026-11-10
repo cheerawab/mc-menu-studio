@@ -2,7 +2,8 @@
 // Pure TypeScript; runs in Node and in the browser. Pipeline: tiles -> code points -> sheets -> runs -> dialogs -> zips.
 import { DEFAULT_FOOTER_LABEL } from '../model/defaults';
 import { KEY_RE } from '../model/ids';
-import { DEFAULT_TILE_SIZE, glyphAdvance, MAX_PICTURE_WIDTH, MAX_VERIFIED_OFFSET } from './constants';
+import { isRenderScale } from '../render/scale';
+import { defaultTileSize, glyphAdvance, MAX_CELL_TEXELS, MAX_PICTURE_WIDTH, MAX_VERIFIED_OFFSET } from './constants';
 import { clickEvent, dialogObject, footerCommand, hoverEvent, oneLine, textComponents } from './dialogs';
 import { ExportError } from './errors';
 import { composePage, splitRegion, type Box, type HitPlacement, type PageLayout, type Placement } from './layout';
@@ -67,9 +68,15 @@ export function resolveOptions(o: ExportOptions): ResolvedOptions {
     quickActions: o.mode === 'registry' && o.quickActions,
     afterAction: o.afterAction,
     commandMode: o.commandMode ?? 'direct',
-    tileSize: o.tileSize ?? DEFAULT_TILE_SIZE,
+    scale: o.scale ?? 1,
+    tileSize: o.tileSize ?? defaultTileSize(o.scale ?? 1),
     autotest: o.autotest ?? false,
   };
+}
+
+/** Page size in page px: the explicit size, else the image size / scale. */
+export function pageSize(p: ExportPage, scale: number): { w: number; h: number } {
+  return { w: p.width ?? p.image.width / scale, h: p.height ?? p.image.height / scale };
 }
 
 export function defaultFileNames(ns: string): FileNames {
@@ -87,6 +94,9 @@ function fail(message: string): never {
 }
 
 function validateInput(pages: ExportPage[], o: ResolvedOptions): void {
+  if (!isRenderScale(o.scale)) fail(`解析度必須是 1、2、3 或 4 倍（收到 ${String(o.scale)}）。`);
+  if (o.tileSize * o.scale > MAX_CELL_TEXELS)
+    fail(`圖塊 ${o.tileSize} px × ${o.scale} 倍 = ${o.tileSize * o.scale} 像素，超過遊戲字型圖集的上限 ${MAX_CELL_TEXELS}。請降低解析度或縮小圖塊。`);
   if (!KEY_RE.test(o.namespace)) fail(`命名空間「${o.namespace}」只能使用小寫英文字母、數字與底線。`);
   if (o.namespace === 'minecraft') fail('命名空間不能是 minecraft（會蓋掉遊戲內建的檔案），請改成自己的名稱。');
   if (!pages.length) fail('沒有可以匯出的頁面。');
@@ -95,10 +105,13 @@ function validateInput(pages: ExportPage[], o: ResolvedOptions): void {
     if (!KEY_RE.test(p.key)) fail(`頁面檔名「${p.key}」只能使用小寫英文字母、數字與底線。`);
     if (keys.has(p.key)) fail(`頁面檔名「${p.key}」重複了。`);
     keys.add(p.key);
-    const { width: W, height: H, data } = p.image;
+    const { width: IW, height: IH, data } = p.image;
+    const { w: W, h: H } = pageSize(p, o.scale);
     if (!Number.isInteger(W) || !Number.isInteger(H) || W < 1 || H < 1) fail(`頁面「${p.key}」的尺寸不正確。`);
+    if (IW !== W * o.scale || IH !== H * o.scale)
+      fail(`頁面「${p.key}」的圖片是 ${IW}×${IH} 像素，應為 ${W}×${H} 頁面像素 × ${o.scale} 倍 = ${W * o.scale}×${H * o.scale}。`);
     if (W > MAX_PICTURE_WIDTH) fail(`頁面「${p.key}」寬 ${W} px，超過遊戲上限 ${MAX_PICTURE_WIDTH} px。`);
-    if (data.length !== W * H * 4) fail(`頁面「${p.key}」的圖片資料長度不正確。`);
+    if (data.length !== IW * IH * 4) fail(`頁面「${p.key}」的圖片資料長度不正確。`);
   }
   for (const p of pages)
     for (const r of p.regions)
@@ -119,14 +132,14 @@ export function buildExport(input: ExportPage[], options: ExportOptions, names?:
   const ns = o.namespace;
   const fileNames = { ...defaultFileNames(ns), ...names };
   const warnings: ExportWarning[] = [];
-  const tileSet = new TileSet(o.tileSize);
+  const tileSet = new TileSet(o.tileSize, o.scale);
   let tilesEmpty = 0;
 
   // 1) tiles (deduped over all pages) and hit boxes of the regions that carry events
   const prepared: Prepared[] = input.map((page) => {
     const { placed, empty } = tileSet.add(page.image);
     tilesEmpty += empty;
-    const W = page.image.width, H = page.image.height;
+    const { w: W, h: H } = pageSize(page, o.scale);
     const regions: ExportRegion[] = [];
     const hits: Prepared['hits'] = [];
     let extended = false;
@@ -175,12 +188,13 @@ export function buildExport(input: ExportPage[], options: ExportOptions, names?:
       message: `圖塊很多（共 ${alloc.count} 個字元），超出的部分改用補充私用區字元，這在遊戲中尚待實機驗證。可以減少頁面數量或縮小頁面。`,
     });
 
-  // 3) sheets
+  // 3) sheets: tile cells of S * scale texels drawn S GUI px tall (JSON height S); hit glyphs stay 1x
   const S = o.tileSize;
   const { sheets: tileSheets, sheetOf } = packSheets(
     'tiles',
     tileSet.tiles.map((t, i) => ({ pixels: t.pixels, cp: tileCp[i] })),
-    S,
+    tileSet.cell,
+    tileSet.cell,
     S,
   );
   const hitSheets = new Map<string, Sheet>();
@@ -195,10 +209,10 @@ export function buildExport(input: ExportPage[], options: ExportOptions, names?:
 
   // 4) runs, text components and dialogs per page
   const pages: BuiltPage[] = prepared.map(({ page, placed, regions, hits }) => {
-    const W = page.image.width, H = page.image.height;
+    const { w: W, h: H } = pageSize(page, o.scale);
     const tiles: Placement[] = placed.map((t) => {
       use(t.y, tileSheets[sheetOf[t.tile]]);
-      return { x: t.x, y: t.y, cp: tileCp[t.tile], advance: glyphAdvance(tileSet.tiles[t.tile].actualWidth) };
+      return { x: t.x, y: t.y, cp: tileCp[t.tile], advance: glyphAdvance(tileSet.tiles[t.tile].actualWidth, o.scale) };
     });
     const hitGlyphs: HitPlacement[] = hits.map(({ region, box }) => {
       const k = `${box.w}x${box.h}`;
@@ -246,6 +260,8 @@ export function buildExport(input: ExportPage[], options: ExportOptions, names?:
     afterAction: o.afterAction,
     commandMode: o.commandMode,
     triggers,
+    scale: o.scale,
+    tileSize: S,
     pages: pages.map((p) => ({ key: p.key, title: p.title, footerLabel: p.footerLabel })),
     files: { resourcePack: fileNames.resourcePack, dataPack: fileNames.dataPack },
     hasCommands: allRegions.some((r) => r.action.type === 'command'),
@@ -255,7 +271,9 @@ export function buildExport(input: ExportPage[], options: ExportOptions, names?:
   const sum = (f: (p: BuiltPage) => number) => pages.reduce((n, p) => n + f(p), 0);
   const stats: ExportStats = {
     pages: pages.length,
+    scale: o.scale,
     tileSize: S,
+    cellTexels: tileSet.cell,
     tilesPlaced: sum((p) => p.tiles),
     tilesEmpty,
     tilesUnique: tileSet.tiles.length,

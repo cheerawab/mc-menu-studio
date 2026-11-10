@@ -145,6 +145,8 @@ export function normalizeProject(input: unknown): LoadResult {
   if (typeof s.fontFamily === 'string' && s.fontFamily.trim()) settings.fontFamily = s.fontFamily;
   if (typeof s.accent === 'string') settings.accent = s.accent;
   if (typeof s.footerLabel === 'string') settings.footerLabel = s.footerLabel;
+  // missing (projects from before Stage H) or invalid => the default 2x
+  if (s.renderScale === 1 || s.renderScale === 2 || s.renderScale === 3 || s.renderScale === 4) settings.renderScale = s.renderScale;
 
   const project = createProject({
     id: str(r.id, '') || newId(),

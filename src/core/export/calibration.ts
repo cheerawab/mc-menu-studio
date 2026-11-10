@@ -1,6 +1,6 @@
 // Calibration page for real-game checks (idea of the spike's grid_scene): 256x160, 16 px grid, coloured corner
 // squares, centre cross, checker, gradient bar, plus a few test regions (corners, checker, gradient > 128 px).
-import type { ExportPage, ExportRegion } from './types';
+import type { RgbaImage, ExportPage, ExportRegion } from './types';
 
 export const CALIBRATION_KEY = 'calibration';
 export const CALIBRATION_SIZE = { w: 256, h: 160 } as const;
@@ -33,8 +33,26 @@ export function calibrationImage(): { width: number; height: number; data: Uint8
   return { width: W, height: H, data };
 }
 
-/** The calibration page. `linkKey` (optional) is the page the bottom-left square opens. */
-export function calibrationPage(linkKey?: string): ExportPage {
+/** Nearest-neighbour upscale (each pixel becomes scale x scale texels). */
+export function upscaleImage(img: RgbaImage, scale: number): RgbaImage {
+  if (scale === 1) return img;
+  const W = img.width * scale, H = img.height * scale;
+  const data = new Uint8Array(W * H * 4);
+  for (let y = 0; y < H; y++) {
+    const row = Math.floor(y / scale) * img.width;
+    for (let x = 0; x < W; x++) {
+      const s = (row + Math.floor(x / scale)) * 4;
+      data.set(img.data.subarray(s, s + 4), (y * W + x) * 4);
+    }
+  }
+  return { width: W, height: H, data };
+}
+
+/**
+ * The calibration page. `linkKey` (optional) is the page the bottom-left square opens. At `scale` > 1 the 1x picture
+ * is upscaled nearest-neighbour (same grid, same page px), so it checks the tile cells of that export.
+ */
+export function calibrationPage(linkKey?: string, scale = 1): ExportPage {
   const regions: ExportRegion[] = [
     { x: 1, y: 1, w: 8, h: 8, action: { type: 'copy', text: 'MCMS calibration: top-left' }, tooltip: '左上角 8×8：複製文字' },
     { x: 247, y: 1, w: 8, h: 8, action: { type: 'command', command: 'random value 1..6' }, tooltip: '右上角 8×8：/random value 1..6' },
@@ -47,5 +65,7 @@ export function calibrationPage(linkKey?: string): ExportPage {
     { x: 100, y: 100, w: 16, h: 16, action: { type: 'close' }, tooltip: '棋盤格 16×16：關閉選單（/dialog clear @s）' },
     { x: 0, y: 140, w: 256, h: 6, action: { type: 'command', command: 'random value 1..100' }, tooltip: '漸層條 256×6：拆成兩個 128×6 點擊區\n/random value 1..100' },
   ];
-  return { key: CALIBRATION_KEY, title: '校準頁 calibration', footerLabel: '關閉', image: calibrationImage(), regions };
+  const { w, h } = CALIBRATION_SIZE;
+  const image = upscaleImage(calibrationImage(), scale);
+  return { key: CALIBRATION_KEY, title: '校準頁 calibration', footerLabel: '關閉', image, width: w, height: h, regions };
 }

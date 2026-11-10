@@ -42,8 +42,9 @@ export interface FontPlan {
   sheets: Sheet[];
 }
 
+/** `height` is the cell height in GUI px (never texels), so `ascent` keeps its GUI meaning at every render scale. */
 export function bitmapProvider(ns: string, sheet: Sheet, offset: number) {
-  return { type: 'bitmap', file: `${ns}:font/${sheet.name}.png`, height: sheet.cellH, ascent: BASELINE - offset, chars: sheet.chars };
+  return { type: 'bitmap', file: `${ns}:font/${sheet.name}.png`, height: sheet.height, ascent: BASELINE - offset, chars: sheet.chars };
 }
 
 export function resourcePackFiles(ns: string, description: string, sheets: Sheet[], fonts: FontPlan[]): FileMap {
