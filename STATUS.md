@@ -1,4 +1,73 @@
-# STATUS — Stage H (export resolution 1x-4x) — done; 2x-4x not run in the game yet
+# STATUS — Stage I (MCP server, agent operability) — done; not yet driven against a real game by Hermes
+
+## Stage I: what changed
+
+Goal (TASK_MCP.md / MCP_PLAN.md): let an AI agent operate MC Menu Studio end to end — create a project, edit
+pages/elements, check, preview, export — without a browser, over the Model Context Protocol. `src/mcp/` is a
+second frontend over the exact same `src/core` functions the React editor uses; it is not allowed to (and does
+not) reimplement any render/export/validate logic. See `docs/MCP.md` for the full tool reference and design
+write-up; this section is the changelog entry.
+
+- `scripts/mcp-server.ts`: stdio MCP server entry point (`npm run mcp`). `src/mcp/server.ts` (`createServer()`)
+  registers 25 `mcms.*` tools across the seven groups from MCP_PLAN.md §2.3:
+  - **A. project** — `list_templates`, `create`, `open`, `save`, `get`.
+  - **B. page** — `add`, `update`, `remove`, `duplicate`, `move`.
+  - **C. element** — `add`, `update`, `remove`, `move_z`, `duplicate`, `align`, `distribute`.
+  - **D. schema** (introspection) — `element_types`, `icons`, `skins`.
+  - **E. check** — `project` (wraps `export/project.ts checkExport`).
+  - **F. preview** — `page`, `game_mock` (wrap `render/renderPage.ts` + `export/png.ts` / `game/chrome.ts`,
+    write a PNG to disk by default, `inline: true` returns base64 image content instead).
+  - **G. export** — `build` (stats + warnings, no files), `write` (zips to `outDir`).
+- **State model** (`src/mcp/state.ts`): a `*.mcms.json` file is the source of truth; `ProjectStore` keeps an
+  in-memory `Project` per handle but writes it back to its file after every mutation, so an agent crash/reconnect
+  or a person opening the same JSON in the browser editor never sees stale state. `mcms.project.create` refuses
+  to overwrite an existing file (it is for *new* projects; `mcms.project.open` re-attaches to one).
+- **Validation boundary** (`src/mcp/schemas.ts`): one zod schema per concept, reused across tools. Deliberately
+  bounds two things `src/core` leaves to its callers to bound (the editor's own `NumberInput` already does this
+  client-side): page width/height to `PAGE_LIMITS`, and `mcms.preview.game_mock`'s window size to 3840px — both
+  would otherwise drive an unbounded `createCanvas()` allocation. Everything else `model/defaults.ts
+  normalizeElement` already clamps is left alone (not re-validated at the MCP layer).
+- `@napi-rs/canvas` moved from `devDependencies` to `dependencies` (the server renders at runtime, not just in
+  dev scripts).
+- `scripts/mcp-smoke.ts` (`npm run mcp:smoke`): spawns the real server over stdio with the MCP client SDK and
+  drives create (from the `lobby` template) -> edit a label -> check -> preview.page -> export.write, asserting
+  non-empty zips and a real PNG at each step.
+- Tests: `src/mcp/__tests__/*.test.ts`, +58 (193 -> 251 total). Covers: every zod schema's reject/accept pairs;
+  the file-is-truth invariant (file content always equals `serializeProject(current project)` after a mutation);
+  `export.build`'s stats equal a direct `buildExport` call field-by-field (proof nothing was reimplemented);
+  `export.write` byte-determinism across two calls; a full create -> add page -> add element -> update -> check
+  -> export chain.
+
+### How to test it
+
+```
+npm run mcp             # start the stdio server (for a real MCP client, e.g. claude mcp add)
+npm run mcp:smoke       # scripted end-to-end check, see above
+npm test -- src/mcp     # just the MCP unit tests
+```
+
+### Self-review (3 rounds, `.logs/mcp_round_{1,2,3}.md`)
+
+Round 1 found and fixed the unbounded-canvas-allocation gaps above and a raw-`ENOENT` error that should have
+been zh-TW. Round 2 found and fixed the silent-overwrite gap in `project.create`. Round 3 was a clean mechanical
+audit of every hard rule (no `src/app`/React/Next import, zero `src/core` diff, zero existing-test diff) plus
+closing a smoke-test coverage gap (group F/previews was unit-tested but never run through the real stdio
+transport, where the `@napi-rs/canvas` native binding has to resolve in a spawned subprocess) — no further bugs.
+
+### Known gaps / not verified
+
+- **Not run against a real MCP client or a real game** by Hermes yet (CLAUDE.md rule 3: this agent never
+  launches Minecraft or an interactive MCP client UI). Verified only with the MCP SDK's own `Client` +
+  `StdioClientTransport` in `scripts/mcp-smoke.ts` and vitest.
+- `mcms.page.add`'s top-level arguments are not `.strict()` the way `page.update`'s nested `patch` is (an SDK
+  API-shape constraint: raw tool shapes are plain objects of zod types, not a `ZodObject` to call `.strict()` on
+  directly) — a typo'd field name is silently dropped rather than rejected. Everywhere else (`element.add`'s
+  `props`, every `*.update`'s `patch`) is strict.
+- Multi-agent concurrency on the same handle is out of scope (MCP_PLAN.md §7); single-agent sequential use is
+  safe because `ProjectStore.mutate` has no `await` in its critical section.
+- No `session.undo` (MCP_PLAN.md §2.2 mentions it as optional); an agent undoes by re-reading the file or using
+  `mcms.project.get`/targeted `update`/`remove` calls instead. Not attempted given the time budget; flagging it
+  here rather than a half-built version.
 
 ## Stage H: what changed
 

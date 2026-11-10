@@ -274,6 +274,8 @@ Minecraft 的介面是用「GUI 像素」計算的：GUI 大小 = 遊戲視窗�
 | `npm test` | 單元測試（vitest），包含渲染決定性、匯出 golden 檔、編輯器冒煙測試與手機版面、觸控操作 |
 | `npm run demo:export -- [--mode registry\|functions\|both] [--commands trigger\|direct] [--scale 1\|2\|3\|4] [--out exports/demo] [--autotest]` | 不開瀏覽器，用 Node 匯出所有範本加校準頁，寫到 `exports/demo/<mode>/`，另外產生 `exports/demo/HANDOFF.md`；`--scale` 指定解析度（預設用範本的 2x） |
 | `npm run preview:skins` | 把範本與圖示輸出成 PNG（`exports/previews/`） |
+| `npm run mcp` | 啟動 MCP（Model Context Protocol）伺服器（stdio），讓 AI agent 操作選單工坊，見下方「Agent / MCP」 |
+| `npm run mcp:smoke` | MCP 伺服器的端到端煙測（自己啟動伺服器、跑一輪建立→編輯→檢查→匯出） |
 
 `exports/` 是產生出來的檔案，不在版本控制裡。
 
@@ -284,6 +286,16 @@ Minecraft 的介面是用「GUI 像素」計算的：GUI 大小 = 遊戲視窗�
 - 開發進度、測試方式與待解問題：[`STATUS.md`](STATUS.md)。
 
 運作原理：每一頁先畫成點陣圖，切成 32 px 的圖塊（重複的只存一次），放進資源包的點陣字型；對話框裡的一段 `plain_message` 文字用空白字型移動位置，把這些「字」拼回原圖。可點擊的區域是看不見的字元，帶著點擊和滑鼠提示事件。/trigger 模式另外在資料包加上 `trigger_load`、`trigger_tick` 兩個函數。
+
+### Agent / MCP
+
+`src/mcp/` 讓 AI agent 能透過 [MCP](https://modelcontextprotocol.io) 直接操作選單工坊：建立專案、編輯頁面與元件、檢查、預覽成 PNG、匯出 zip，完全不用開瀏覽器。它是 `src/core` 的第二個前端（和 `src/app/` 共用同一套純函式），只做薄包裝，不重寫渲染／匯出／檢查邏輯。
+
+```
+claude mcp add mcms -- npx tsx scripts/mcp-server.ts
+```
+
+工具清單、狀態模型（專案檔即真相來源）與設計理由見 [`docs/MCP.md`](docs/MCP.md)。
 
 </details>
 
