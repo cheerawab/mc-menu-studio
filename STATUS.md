@@ -1,9 +1,36 @@
-# STATUS — Stage C (trigger mode) — done
+# STATUS — Stage D (README for ordinary users) — done
 
 Stage A (editor, renderer, skins, templates, persistence), Stage B (exporter, demo CLI, Export dialog) and Stage C
 (trigger command mode, footer/after_action corrections from the decompiled client) are implemented. The exporter
 follows `docs/VERIFIED.md` (§13 for Stage C). Nothing here was run in Minecraft by me (rule: never launch the game);
 Hermes tests the exports.
+
+## Stage D: what changed
+
+- `README.md` rewritten for players / server admins (zh-TW): what it is, 8 screenshots in `docs/images/` (real in-game
+  shots + editor shots), step-by-step install → design → export → use (single-player and server; the steps follow the
+  exporter's `README_zh-TW.txt`), tested vs untested list, limits, size limits (formula + table from VERIFIED §16-18),
+  the RPG-style PoC pages (marked as not buildable with the editor), FAQ. Developer commands and layout are in a
+  `<details>` block at the end.
+- `src/app/editor/ui.tsx` (commit ec6eac0): the `Toggle` knob was drawn outside its track, over the label (the
+  `<button>`'s `text-align: center` set the knob's static position to the middle of the track); `left-0` + `shrink-0`.
+- No exporter, renderer or in-app wording change; exports not regenerated. lint ✓, typecheck ✓, test ✓ (96/96).
+
+Current verification state (supersedes the Stage C list below): VERIFIED in the real 26.3 client (single-player,
+functions mode, VERIFIED §12, §14-18): picture placement of all 9 demo pages; the /trigger chain (the autotest sent
+the same `/trigger` a button sends, `time set day` ran, a navigation id opened the next page; simulated, not a mouse
+click); hover tooltips; size limits at GUI 480x270 and 853x480. NOT TESTED: real mouse clicks (incl. copy/URL, footer
+button, Esc), registry mode + G key, dedicated servers, other game versions, the editor on Windows/Linux.
+
+In-app texts and estimates that are now behind the README / the game (open; next stage):
+- Export dialog 注意事項 still says 「尚待實機驗證：按鈕點擊、滑鼠提示文字、頁面切換、底部按鈕與 /trigger 的實際執行」;
+  tooltips, trigger execution and trigger navigation are verified (§14-15). Same outdated line in the generated
+  `README_zh-TW.txt` (`src/core/export/readme.ts`).
+- `chrome.ts` fit check: height uses `S - 100` (the game has `S - 66`, so the editor warns early); width uses
+  `W + 12 <= GUI width` while the game crops beyond `GUI width - 32` (the editor shows 可完整顯示 for pages up to
+  20 px too wide). The README documents both.
+- Inspector 頁面 → 檔名 hint always shows the registry command `/dialog show @s ns:key`, also for functions exports.
+- The preview offers GUI 1-4 only; a 2560x1440 screen on "auto" uses scale 6 (GUI about 427x240).
 
 ## How to run and test (exact commands)
 
