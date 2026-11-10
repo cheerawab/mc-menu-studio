@@ -1,34 +1,51 @@
 'use client';
 
-import {
-  AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter,
-  AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ArrowDownToLine, ArrowUpToLine, Grid3x3,
-  Maximize, MousePointerClick, ZoomIn, ZoomOut,
-} from 'lucide-react';
+import { Grid3x3, Maximize, Minus, MousePointerClick, Plus, ZoomIn, ZoomOut } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   bbox, fitZoom, HANDLES, hitTest, MAX_ZOOM, MIN_ZOOM, rectFromPoints, rectPatchFor, rectsIntersect, resizeRect,
   snapMoveDelta, SNAP_STEPS, zoomAround, type Handle, type SnapStep,
 } from '@/core/geometry';
+import {
+  isDoubleTap, isTap, keepInView, panBy, pinchView, TAP_SLOP, visibleHandles, type PinchStart, type Pt, type TapRecord,
+} from '@/core/gestures';
 import { createElement } from '@/core/model/defaults';
 import { addElements, updateElements } from '@/core/model/ops';
 import type { ElementType, Id, Rect } from '@/core/model/types';
 import { computeRegions, renderPage } from '@/core/render/renderPage';
 import type { Ctx2D } from '@/core/render/types';
 import { renderEnv, useImagesVersion } from '../state/images';
+import { mobile } from '../state/mobile';
 import { fileToAsset } from '../state/persistence';
 import { currentPage, editor, useEditor } from '../state/store';
 import { addElementOfType } from './elementMeta';
+import { useLayout } from './layoutTier';
 import { DND_ELEMENT } from './LeftPanel';
+import { AlignButtons, ZOrderEndButtons } from './TouchControls';
 import { cx, IconButton, Segmented } from './ui';
 
 const RULER = 20;
 
+// Mouse / pen: drag = move / resize / marquee, middle button or Space = pan.
+// Touch: one finger drags elements and handles or pans on empty space (tap = select / deselect, double tap on empty
+// space = fit); two fingers pinch-zoom and pan. A second finger drops a drag in progress (no history entry).
+type MoveGesture = {
+  kind: 'move'; sx: number; sy: number; ids: Id[]; origin: Rect[]; started: boolean; clicked: Id;
+  /** Screen px the pointer must travel before the drag starts. */
+  slop: number;
+  /** What a tap (no drag) does: keep only the tapped element, toggle it (多選), or nothing (it was just added). */
+  onTap: 'collapse' | 'toggle' | 'none';
+};
+type ResizeGesture = { kind: 'resize'; sx: number; sy: number; id: Id; handle: Handle; origin: Rect; started: boolean; slop: number };
 type Gesture =
-  | { kind: 'pan'; sx: number; sy: number; panX: number; panY: number }
-  | { kind: 'move'; sx: number; sy: number; ids: Id[]; origin: Rect[]; started: boolean; clicked: Id }
-  | { kind: 'resize'; sx: number; sy: number; id: Id; handle: Handle; origin: Rect; started: boolean }
-  | { kind: 'marquee'; px: number; py: number; base: Id[] };
+  /** `tap`: a touch on empty space that has not left the tap slop yet (lifting it deselects). */
+  | { kind: 'pan'; sx: number; sy: number; panX: number; panY: number; tap?: boolean }
+  | MoveGesture
+  | ResizeGesture
+  | { kind: 'marquee'; px: number; py: number; base: Id[] }
+  | { kind: 'pinch'; ids: [number, number]; start: PinchStart }
+  /** Touch: ignore the remaining fingers until all are lifted. */
+  | { kind: 'wait' };
 
 const HANDLE_CURSOR: Record<Handle, string> = {
   n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
@@ -101,25 +118,49 @@ function drawRuler(
   else ctx.fillRect(RULER - 1, 0, 1, H);
 }
 
-function Toolbar({ onFit }: { onFit: () => void }) {
+/** Zoom one step around the centre of the stage. */
+function zoomStep(d: number) {
+  const view = editor().view;
+  const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, view.zoom + d));
+  if (z === view.zoom) return;
+  const el = document.querySelector('[data-stage]');
+  const r = el?.getBoundingClientRect();
+  const cxp = r ? r.width / 2 : 0, cyp = r ? r.height / 2 : 0;
+  editor().setView({ zoom: z, ...zoomAround(view.panX, view.panY, cxp, cyp, view.zoom, z) });
+}
+
+/** Compact tier: floating zoom buttons instead of the toolbar (for users who do not pinch). */
+function ZoomControls({ onFit }: { onFit: () => void }) {
+  const zoom = useEditor((s) => s.view.zoom);
+  return (
+    <div role="toolbar" aria-label="縮放" className="absolute top-7 right-2 z-20 flex items-center rounded-xl border border-ink-700 bg-ink-900/90 p-0.5 shadow-lg shadow-black/40 backdrop-blur">
+      <IconButton size="lg" label="縮小" disabled={zoom <= MIN_ZOOM} onClick={() => zoomStep(-1)}>
+        <Minus size={18} />
+      </IconButton>
+      <span className="w-12 text-center font-mono text-[13px] text-fg-muted tabular-nums" aria-live="polite">{zoom * 100}%</span>
+      <IconButton size="lg" label="放大" disabled={zoom >= MAX_ZOOM} onClick={() => zoomStep(1)}>
+        <Plus size={18} />
+      </IconButton>
+      <IconButton size="lg" label="符合視窗" onClick={onFit}>
+        <Maximize size={17} />
+      </IconButton>
+    </div>
+  );
+}
+
+function Toolbar({ onFit, scroll = false }: { onFit: () => void; scroll?: boolean }) {
   const view = useEditor((s) => s.view);
   const nSel = useEditor((s) => s.selection.length);
   const page = useEditor(currentPage);
-  const zoomBy = (d: number) => {
-    const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, view.zoom + d));
-    if (z === view.zoom) return;
-    const el = document.querySelector('[data-stage]');
-    const r = el?.getBoundingClientRect();
-    const cxp = r ? r.width / 2 : 0, cyp = r ? r.height / 2 : 0;
-    editor().setView({ zoom: z, ...zoomAround(view.panX, view.panY, cxp, cyp, view.zoom, z) });
-  };
-  const sep = <div className="mx-1 h-4 w-px bg-line" />;
+  const zoomBy = zoomStep;
+  const sep = <div className="mx-1 h-4 w-px shrink-0 bg-line" />;
   return (
-    <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-line bg-ink-900 px-2" role="toolbar" aria-label="畫布工具列">
+    // medium tier: the toolbar is wider than the canvas column, so it scrolls sideways
+    <div className={cx('flex h-10 shrink-0 items-center gap-0.5 border-b border-line bg-ink-900 px-2', scroll && 'overflow-x-auto overflow-y-hidden')} role="toolbar" aria-label="畫布工具列">
       <IconButton label="縮小（-）" onClick={() => zoomBy(-1)} disabled={view.zoom <= MIN_ZOOM}>
         <ZoomOut size={15} />
       </IconButton>
-      <span className="w-11 text-center font-mono text-[12px] text-fg-muted tabular-nums" aria-live="polite">{view.zoom * 100}%</span>
+      <span className="w-11 shrink-0 text-center font-mono text-[12px] text-fg-muted tabular-nums" aria-live="polite">{view.zoom * 100}%</span>
       <IconButton label="放大（+）" onClick={() => zoomBy(1)} disabled={view.zoom >= MAX_ZOOM}>
         <ZoomIn size={15} />
       </IconButton>
@@ -130,7 +171,7 @@ function Toolbar({ onFit }: { onFit: () => void }) {
       <IconButton label="顯示格線" active={view.showGrid} onClick={() => editor().setView({ showGrid: !view.showGrid })}>
         <Grid3x3 size={15} />
       </IconButton>
-      <span className="ml-1 mr-1 text-[11.5px] text-fg-dim">吸附</span>
+      <span className="ml-1 mr-1 shrink-0 text-[11.5px] text-fg-dim">吸附</span>
       <Segmented<SnapStep>
         label="吸附間距"
         size="sm"
@@ -144,19 +185,11 @@ function Toolbar({ onFit }: { onFit: () => void }) {
       </IconButton>
       {sep}
       <div className="flex items-center" aria-label="對齊">
-        <IconButton label={nSel > 1 ? '靠左對齊' : '對齊頁面左緣'} disabled={!nSel} onClick={() => editor().align('left')}><AlignStartVertical size={15} /></IconButton>
-        <IconButton label={nSel > 1 ? '水平置中' : '頁面水平置中'} disabled={!nSel} onClick={() => editor().align('hcenter')}><AlignCenterVertical size={15} /></IconButton>
-        <IconButton label={nSel > 1 ? '靠右對齊' : '對齊頁面右緣'} disabled={!nSel} onClick={() => editor().align('right')}><AlignEndVertical size={15} /></IconButton>
-        <IconButton label={nSel > 1 ? '靠上對齊' : '對齊頁面上緣'} disabled={!nSel} onClick={() => editor().align('top')}><AlignStartHorizontal size={15} /></IconButton>
-        <IconButton label={nSel > 1 ? '垂直置中' : '頁面垂直置中'} disabled={!nSel} onClick={() => editor().align('vmiddle')}><AlignCenterHorizontal size={15} /></IconButton>
-        <IconButton label={nSel > 1 ? '靠下對齊' : '對齊頁面下緣'} disabled={!nSel} onClick={() => editor().align('bottom')}><AlignEndHorizontal size={15} /></IconButton>
-        <IconButton label="水平平均分布（至少 3 個）" disabled={nSel < 3} onClick={() => editor().distribute('h')}><AlignHorizontalDistributeCenter size={15} /></IconButton>
-        <IconButton label="垂直平均分布（至少 3 個）" disabled={nSel < 3} onClick={() => editor().distribute('v')}><AlignVerticalDistributeCenter size={15} /></IconButton>
+        <AlignButtons nSel={nSel} />
       </div>
       {sep}
-      <IconButton label="移到最上層（Shift+]）" disabled={!nSel} onClick={() => editor().zOrder('top')}><ArrowUpToLine size={15} /></IconButton>
-      <IconButton label="移到最下層（Shift+[）" disabled={!nSel} onClick={() => editor().zOrder('bottom')}><ArrowDownToLine size={15} /></IconButton>
-      <div className="ml-auto pr-1 font-mono text-[11.5px] text-fg-dim tabular-nums">
+      <ZOrderEndButtons nSel={nSel} keys />
+      <div className="ml-auto shrink-0 pr-1 pl-2 font-mono text-[11.5px] whitespace-nowrap text-fg-dim tabular-nums">
         {page.width} × {page.height}
       </div>
     </div>
@@ -164,6 +197,8 @@ function Toolbar({ onFit }: { onFit: () => void }) {
 }
 
 export default function CanvasView() {
+  const { tier, coarse } = useLayout();
+  const compact = tier === 'compact';
   const page = useEditor(currentPage);
   const project = useEditor((s) => s.project);
   const selection = useEditor((s) => s.selection);
@@ -183,6 +218,11 @@ export default function CanvasView() {
   const [spaceDown, setSpaceDown] = useState(false);
   const [panning, setPanning] = useState(false);
   const [dropActive, setDropActive] = useState(false);
+  /** Active touch points (stage px) by pointer id. */
+  const touches = useRef(new Map<number, Pt>());
+  const lastTap = useRef<TapRecord | null>(null);
+  const lastPointerType = useRef('mouse');
+  const prevSize = useRef<{ w: number; h: number } | null>(null);
   const { zoom, panX, panY } = view;
 
   // viewport size
@@ -214,6 +254,17 @@ export default function CanvasView() {
     fittedFor.current = page.id;
     fit();
   }, [page.id, size, fit]);
+
+  // compact: when a sheet opens or closes the stage changes size; keep the view centre and the selection in sight
+  useEffect(() => {
+    if (!size) return;
+    const prev = prevSize.current;
+    prevSize.current = size;
+    if (!compact || !prev || fittedFor.current === null || (prev.w === size.w && prev.h === size.h)) return;
+    const s = editor();
+    const box = bbox(currentPage(s).elements.filter((e) => s.selection.includes(e.id)));
+    s.setView(keepInView(s.view, prev, size, box));
+  }, [size, compact]);
 
   // render the page bitmap
   useEffect(() => {
@@ -300,7 +351,174 @@ export default function CanvasView() {
     return { x: (clientX - r.left - v.panX) / v.zoom, y: (clientY - r.top - v.panY) / v.zoom };
   };
 
+  const stagePt = (clientX: number, clientY: number): Pt => {
+    const r = stageRef.current!.getBoundingClientRect();
+    return { x: clientX - r.left, y: clientY - r.top };
+  };
+
+  /** Applies a move / resize drag (shared by mouse and touch). */
+  const dragTo = (g: MoveGesture | ResizeGesture, clientX: number, clientY: number, shift: boolean) => {
+    const s = editor();
+    const z = s.view.zoom;
+    if (!g.started) {
+      if (Math.hypot(clientX - g.sx, clientY - g.sy) < g.slop || (g.kind === 'move' && !g.ids.length)) return;
+      g.started = true;
+      s.beginGesture();
+    }
+    if (g.kind === 'move') {
+      let dx = (clientX - g.sx) / z, dy = (clientY - g.sy) / z;
+      if (shift) {
+        if (Math.abs(dx) > Math.abs(dy)) dy = 0;
+        else dx = 0;
+      }
+      const d = snapMoveDelta(g.origin, dx, dy, s.view.snap);
+      const byId = new Map(g.ids.map((id, i) => [id, g.origin[i]]));
+      s.updateGesture((base) => updateElements(base, s.pageId, g.ids, (el) => {
+        const o = byId.get(el.id)!;
+        return { x: o.x + d.dx, y: o.y + d.dy };
+      }));
+      return;
+    }
+    const el = currentPage(s).elements.find((x) => x.id === g.id);
+    if (!el) return;
+    const r = resizeRect(g.origin, g.handle, (clientX - g.sx) / z, (clientY - g.sy) / z, {
+      snap: s.view.snap,
+      keepAspect: shift || el.type === 'image',
+    });
+    const patch = rectPatchFor(el, r, g.handle);
+    s.updateGesture((base) => updateElements(base, s.pageId, [g.id], patch));
+  };
+
+  // ---- touch
+
+  const touchDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const pts = touches.current;
+    if (e.isPrimary) pts.clear(); // first finger of a new touch sequence: forget points whose pointerup got lost
+    pts.set(e.pointerId, stagePt(e.clientX, e.clientY));
+    const s = editor();
+    const g = gesture.current;
+    if (pts.size === 2) {
+      // second finger: pinch-zoom / two-finger pan; a move or resize in progress is dropped without a history entry
+      if (g && (g.kind === 'move' || g.kind === 'resize') && g.started) s.cancelGesture();
+      const [ia, ib] = [...pts.keys()];
+      const v = s.view;
+      gesture.current = { kind: 'pinch', ids: [ia, ib], start: { a: pts.get(ia)!, b: pts.get(ib)!, zoom: v.zoom, panX: v.panX, panY: v.panY } };
+      lastTap.current = null;
+      setCursor(null);
+      return;
+    }
+    if (pts.size > 2) return;
+    const pg = currentPage(s);
+    const handle = (e.target as HTMLElement).dataset.handle as Handle | undefined;
+    if (handle && s.selection.length === 1) {
+      const el = pg.elements.find((x) => x.id === s.selection[0]);
+      if (el && !el.locked) {
+        gesture.current = { kind: 'resize', sx: e.clientX, sy: e.clientY, id: el.id, handle, origin: { x: el.x, y: el.y, w: el.w, h: el.h }, started: false, slop: TAP_SLOP };
+        return;
+      }
+    }
+    const p = toPage(e.clientX, e.clientY);
+    const hit = hitTest(pg.elements, p.x, p.y);
+    if (!hit) {
+      gesture.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, panX: s.view.panX, panY: s.view.panY, tap: true };
+      return;
+    }
+    let ids = s.selection;
+    let onTap: MoveGesture['onTap'] = 'collapse';
+    if (mobile().multiSelect) {
+      // 多選: a tap on a selected element removes it; an unselected one is added at once; a drag moves them all
+      if (ids.includes(hit.id)) onTap = 'toggle';
+      else {
+        ids = [...ids, hit.id];
+        s.select(ids);
+        onTap = 'none';
+      }
+    } else if (!ids.includes(hit.id)) {
+      ids = [hit.id];
+      s.select(ids);
+    }
+    const els = pg.elements.filter((x) => ids.includes(x.id) && !x.locked);
+    gesture.current = {
+      kind: 'move', sx: e.clientX, sy: e.clientY, ids: els.map((x) => x.id), origin: els.map((x) => ({ x: x.x, y: x.y, w: x.w, h: x.h })),
+      started: false, clicked: hit.id, slop: TAP_SLOP, onTap,
+    };
+  };
+
+  const touchMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const pts = touches.current;
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, stagePt(e.clientX, e.clientY));
+    const g = gesture.current;
+    if (!g) return;
+    const s = editor();
+    if (g.kind === 'pinch') {
+      const a = pts.get(g.ids[0]), b = pts.get(g.ids[1]);
+      if (!a || !b) return;
+      const v = pinchView(g.start, a, b);
+      const cur = s.view;
+      if (v.zoom !== cur.zoom || v.panX !== cur.panX || v.panY !== cur.panY) s.setView(v);
+      return;
+    }
+    if (g.kind === 'pan') {
+      const from = { x: g.sx, y: g.sy }, to = { x: e.clientX, y: e.clientY };
+      if (g.tap && !isTap(from, to)) g.tap = false;
+      s.setView(panBy(g.panX, g.panY, from, to));
+      return;
+    }
+    if (g.kind === 'move' || g.kind === 'resize') {
+      const p = toPage(e.clientX, e.clientY);
+      setCursor({ x: Math.floor(p.x), y: Math.floor(p.y) });
+      dragTo(g, e.clientX, e.clientY, false);
+    }
+  };
+
+  const touchUp = (e: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const pts = touches.current;
+    if (!pts.delete(e.pointerId)) return;
+    const g = gesture.current;
+    if (!g) return;
+    if (g.kind === 'pinch' || g.kind === 'wait') {
+      gesture.current = pts.size ? { kind: 'wait' } : null;
+      return;
+    }
+    gesture.current = null;
+    setCursor(null);
+    const s = editor();
+    if ((g.kind === 'move' || g.kind === 'resize') && g.started) {
+      s.endGesture();
+      lastTap.current = null;
+      return;
+    }
+    if (cancelled || g.kind === 'resize' || g.kind === 'marquee' || (g.kind === 'pan' && !g.tap)) {
+      lastTap.current = null;
+      return;
+    }
+    // a tap
+    const rec: TapRecord = { t: e.timeStamp, x: e.clientX, y: e.clientY, key: g.kind === 'move' ? g.clicked : 'empty' };
+    const double = (g.kind === 'pan' || g.onTap === 'collapse') && isDoubleTap(lastTap.current, rec);
+    lastTap.current = double ? null : rec;
+    if (g.kind === 'pan') {
+      if (double) fit();
+      else s.select([]);
+      return;
+    }
+    if (double) {
+      // like a double click: edit the element's text in 屬性
+      s.select([g.clicked]);
+      s.requestTextFocus();
+    } else if (g.onTap === 'toggle') s.toggleSelect(g.clicked);
+    else if (g.onTap === 'collapse' && s.selection.length > 1) s.select([g.clicked]);
+  };
+
+  // ---- pointer events (touch is handled above; mouse and pen below)
+
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    lastPointerType.current = e.pointerType;
+    if (e.pointerType === 'touch') {
+      touchDown(e);
+      return;
+    }
     if (e.button === 2) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const s = editor();
@@ -315,7 +533,7 @@ export default function CanvasView() {
     if (handle && s.selection.length === 1) {
       const el = pg.elements.find((x) => x.id === s.selection[0]);
       if (el && !el.locked) {
-        gesture.current = { kind: 'resize', sx: e.clientX, sy: e.clientY, id: el.id, handle, origin: { x: el.x, y: el.y, w: el.w, h: el.h }, started: false };
+        gesture.current = { kind: 'resize', sx: e.clientX, sy: e.clientY, id: el.id, handle, origin: { x: el.x, y: el.y, w: el.w, h: el.h }, started: false, slop: 0 };
         return;
       }
     }
@@ -333,7 +551,10 @@ export default function CanvasView() {
         s.select(ids);
       }
       const els = pg.elements.filter((x) => ids.includes(x.id) && !x.locked);
-      gesture.current = { kind: 'move', sx: e.clientX, sy: e.clientY, ids: els.map((x) => x.id), origin: els.map((x) => ({ x: x.x, y: x.y, w: x.w, h: x.h })), started: false, clicked: hit.id };
+      gesture.current = {
+        kind: 'move', sx: e.clientX, sy: e.clientY, ids: els.map((x) => x.id), origin: els.map((x) => ({ x: x.x, y: x.y, w: x.w, h: x.h })),
+        started: false, clicked: hit.id, slop: 3, onTap: 'collapse',
+      };
       return;
     }
     if (!additive) s.select([]);
@@ -341,6 +562,10 @@ export default function CanvasView() {
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') {
+      touchMove(e);
+      return;
+    }
     const g = gesture.current;
     const s = editor();
     const p = toPage(e.clientX, e.clientY);
@@ -351,45 +576,14 @@ export default function CanvasView() {
       setHoverId(hit?.id ?? null);
       return;
     }
-    const z = s.view.zoom;
     switch (g.kind) {
       case 'pan':
         s.setView({ panX: g.panX + e.clientX - g.sx, panY: g.panY + e.clientY - g.sy });
         return;
-      case 'move': {
-        let dx = (e.clientX - g.sx) / z, dy = (e.clientY - g.sy) / z;
-        if (!g.started) {
-          if (Math.hypot(e.clientX - g.sx, e.clientY - g.sy) < 3 || !g.ids.length) return;
-          g.started = true;
-          s.beginGesture();
-        }
-        if (e.shiftKey) {
-          if (Math.abs(dx) > Math.abs(dy)) dy = 0;
-          else dx = 0;
-        }
-        const d = snapMoveDelta(g.origin, dx, dy, s.view.snap);
-        const byId = new Map(g.ids.map((id, i) => [id, g.origin[i]]));
-        s.updateGesture((base) => updateElements(base, s.pageId, g.ids, (el) => {
-          const o = byId.get(el.id)!;
-          return { x: o.x + d.dx, y: o.y + d.dy };
-        }));
+      case 'move':
+      case 'resize':
+        dragTo(g, e.clientX, e.clientY, e.shiftKey);
         return;
-      }
-      case 'resize': {
-        if (!g.started) {
-          g.started = true;
-          s.beginGesture();
-        }
-        const el = currentPage(s).elements.find((x) => x.id === g.id);
-        if (!el) return;
-        const r = resizeRect(g.origin, g.handle, (e.clientX - g.sx) / z, (e.clientY - g.sy) / z, {
-          snap: s.view.snap,
-          keepAspect: e.shiftKey || el.type === 'image',
-        });
-        const patch = rectPatchFor(el, r, g.handle);
-        s.updateGesture((base) => updateElements(base, s.pageId, [g.id], patch));
-        return;
-      }
       case 'marquee': {
         const r = rectFromPoints(g.px, g.py, p.x, p.y);
         setMarquee(r);
@@ -401,7 +595,11 @@ export default function CanvasView() {
     }
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') {
+      touchUp(e, e.type === 'pointercancel');
+      return;
+    }
     const g = gesture.current;
     gesture.current = null;
     setMarquee(null);
@@ -447,15 +645,16 @@ export default function CanvasView() {
 
   return (
     <div className="flex h-full flex-col">
-      <Toolbar onFit={fit} />
+      {!compact && <Toolbar onFit={fit} scroll={tier === 'medium'} />}
       <div className="relative min-h-0 flex-1">
+        {compact && <ZoomControls onFit={fit} />}
         <div className="absolute top-0 left-0 z-20 flex h-5 w-5 items-center justify-center border-r border-b border-line bg-ink-900 font-mono text-[8px] text-fg-dim">px</div>
         <canvas ref={rulerH} className="absolute top-0 right-0 left-5 z-10 h-5" style={{ width: size ? size.w : undefined }} aria-hidden />
         <canvas ref={rulerV} className="absolute top-5 bottom-0 left-0 z-10 w-5" style={{ height: size ? size.h : undefined }} aria-hidden />
         <div
           ref={stageRef}
           data-stage
-          className={cx('stage-bg absolute top-5 right-0 bottom-0 left-5 touch-none overflow-hidden select-none', dropActive && 'ring-2 ring-accent/60 ring-inset')}
+          className={cx('stage-bg no-callout absolute top-5 right-0 bottom-0 left-5 touch-none overflow-hidden select-none', dropActive && 'ring-2 ring-accent/60 ring-inset')}
           style={{ cursor: cursorStyle }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -465,7 +664,12 @@ export default function CanvasView() {
             setHoverId(null);
             setCursor(null);
           }}
+          onContextMenu={(e) => {
+            // a long press must not open the browser's image / selection menu
+            if (lastPointerType.current === 'touch') e.preventDefault();
+          }}
           onDoubleClick={(e) => {
+            if (lastPointerType.current === 'touch') return; // double taps are detected in touchUp
             const p = toPage(e.clientX, e.clientY);
             const hit = hitTest(page.elements, p.x, p.y);
             if (hit) {
@@ -533,9 +737,19 @@ export default function CanvasView() {
             )}
             {single && !single.locked && (
               <div className="absolute" style={{ left: single.x * zoom, top: single.y * zoom, width: single.w * zoom, height: single.h * zoom }}>
-                {HANDLES.map((h) => {
+                {(coarse ? visibleHandles(single.w * zoom, single.h * zoom) : HANDLES).map((h) => {
                   const pos = handlePos(h, single.w * zoom, single.h * zoom);
-                  return (
+                  // coarse pointers: 28 px hit area (TOUCH_HANDLE_HIT) around a 12 px visible square
+                  return coarse ? (
+                    <div
+                      key={h}
+                      data-handle={h}
+                      className="absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+                      style={{ left: pos.x, top: pos.y, cursor: HANDLE_CURSOR[h] }}
+                    >
+                      <span className="pointer-events-none h-3 w-3 rounded-[3px] border-2 border-accent bg-ink-950" />
+                    </div>
+                  ) : (
                     <div
                       key={h}
                       data-handle={h}
@@ -557,13 +771,15 @@ export default function CanvasView() {
             )}
           </div>
           {!page.elements.length && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-8 text-center text-[12.5px] text-fg-dim">
-              從左側點選或拖曳元件到頁面上，也可以直接把圖片檔拖進來。
+            <div className="pointer-events-none absolute inset-x-0 bottom-8 px-4 text-center text-[12.5px] text-fg-dim">
+              {compact ? '點下方的「元件」把元件加入頁面。' : '從左側點選或拖曳元件到頁面上，也可以直接把圖片檔拖進來。'}
             </div>
           )}
-          <div className="pointer-events-none absolute right-2 bottom-2 rounded-md bg-ink-900/85 px-2 py-1 font-mono text-[11px] text-fg-dim tabular-nums">
-            {cursor ? `x ${cursor.x}  y ${cursor.y}` : '　'}
-          </div>
+          {!compact && (
+            <div className="pointer-events-none absolute right-2 bottom-2 rounded-md bg-ink-900/85 px-2 py-1 font-mono text-[11px] text-fg-dim tabular-nums">
+              {cursor ? `x ${cursor.x}  y ${cursor.y}` : '　'}
+            </div>
+          )}
         </div>
       </div>
     </div>

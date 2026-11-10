@@ -62,6 +62,8 @@ export interface EditorActions {
   beginGesture(): void;
   updateGesture(fn: (base: Project) => Project): void;
   endGesture(): void;
+  /** Drops a drag in progress: back to the snapshot from beginGesture, no history entry. */
+  cancelGesture(): void;
   undo(): void;
   redo(): void;
   loadProject(p: Project): void;
@@ -175,6 +177,12 @@ export function createEditorStore(project: Project, view: Partial<ViewState> = {
         if (!s.gestureBase) return;
         if (s.gestureBase !== s.project) set({ history: record(s.history, s.gestureBase), gestureBase: null });
         else set({ gestureBase: null });
+      },
+      cancelGesture() {
+        const s = get();
+        if (!s.gestureBase) return;
+        const pageId = ensurePage(s.gestureBase, s.pageId);
+        set({ project: s.gestureBase, gestureBase: null, pageId, selection: validSelection(s.gestureBase, pageId, s.selection) });
       },
       undo() {
         const s = get();

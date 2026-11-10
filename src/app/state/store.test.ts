@@ -42,6 +42,25 @@ describe('editor store', () => {
     expect(currentPage(s()).elements[0].x).toBe(0);
   });
 
+  it('cancels a drag without a history entry (a second finger landed)', () => {
+    const store = fresh();
+    const s = () => store.getState();
+    const el = createElement('label', { x: 4 });
+    s().addElement(el);
+    const before = s().history.past.length;
+    const project = s().project;
+    s().beginGesture();
+    s().updateGesture((base) => updateElements(base, s().pageId, [el.id], { x: 40 }));
+    expect(currentPage(s()).elements[0].x).toBe(40);
+    s().cancelGesture();
+    expect(s().project).toBe(project);
+    expect(s().gestureBase).toBeNull();
+    expect(s().history.past.length).toBe(before);
+    expect(s().selection).toEqual([el.id]);
+    s().cancelGesture(); // no gesture: nothing happens
+    expect(s().project).toBe(project);
+  });
+
   it('copies, pastes with an offset, duplicates and deletes', () => {
     const store = fresh();
     const s = () => store.getState();
