@@ -11,9 +11,10 @@ import type { Action, Id, Page } from '@/core/model/types';
 import { countIssues, validateProject, type Issue } from '@/core/model/validate';
 import { editor, useEditor } from '../state/store';
 import Inspector from './Inspector';
+import { useLayout } from './layoutTier';
 import { cx } from './ui';
 
-function useIssues(): Issue[] {
+export function useIssues(): Issue[] {
   const project = useEditor((s) => s.project);
   const guiScale = useEditor((s) => s.view.guiScale);
   const windowId = useEditor((s) => s.view.windowId);
@@ -48,7 +49,7 @@ function actionSummary(a: Action, pages: Page[]): { icon: typeof Terminal; text:
   }
 }
 
-function LinkMap() {
+export function LinkMap() {
   const project = useEditor((s) => s.project);
   const current = useEditor((s) => s.pageId);
   const incoming = new Map<Id, number>();
@@ -103,7 +104,7 @@ const SEV = {
   info: { icon: Info, cls: 'text-info', label: '提示' },
 } as const;
 
-function IssuesPanel({ issues }: { issues: Issue[] }) {
+export function IssuesPanel({ issues }: { issues: Issue[] }) {
   const c = countIssues(issues);
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -154,13 +155,14 @@ export default function RightPanel() {
   const tab = useEditor((s) => s.rightTab);
   const issues = useIssues();
   const c = countIssues(issues);
+  const medium = useLayout().tier === 'medium';
   const tabs = [
     { id: 'inspect' as const, label: '屬性', icon: SlidersHorizontal },
     { id: 'links' as const, label: '連結', icon: Workflow },
     { id: 'issues' as const, label: '檢查', icon: ListChecks },
   ];
   return (
-    <aside className="flex w-[304px] shrink-0 flex-col bg-ink-900" aria-label="屬性面板">
+    <aside className={cx('flex shrink-0 flex-col bg-ink-900', medium ? 'w-[264px]' : 'w-[304px]')} aria-label="屬性面板">
       <div role="tablist" aria-label="右側面板" className="flex h-10 shrink-0 items-end gap-1 border-b border-line px-2">
         {tabs.map((t) => (
           <button

@@ -26,6 +26,8 @@
 html,
 body {
   height: 100%;
+  /* no pull-to-refresh / rubber-band bounce on phones */
+  overscroll-behavior: none;
 }
 
 body {
@@ -97,4 +99,66 @@ input[type="number"] {
 }
 .animate-toast {
   animation: toast-in 160ms ease-out;
+}
+
+/* ---- responsive editor shell (tiers: src/app/editor/layoutTier.ts) */
+
+/* full dynamic viewport height (100vh fallback); no double-tap zoom on touch (the canvas itself uses touch-action: none) */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+  touch-action: manipulation;
+}
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+.no-callout {
+  -webkit-touch-callout: none;
+}
+
+/* compact tier (phones, portrait tablets): body text >= 14 px, 16 px form fields (iOS zooms into smaller ones) */
+[data-layout="compact"] {
+  font-size: 14px;
+}
+[data-layout="compact"] :is(input:not([type="range"], [type="color"], [type="checkbox"], [type="radio"], [type="file"]), select, textarea) {
+  font-size: 16px;
+  min-height: 40px;
+}
+[data-layout="compact"] [role="switch"] {
+  min-height: 40px;
+}
+[data-layout="compact"] :is(.text-\[10\.5px\], .text-\[11px\]) {
+  font-size: 12.5px;
+}
+[data-layout="compact"] .text-\[11\.5px\] {
+  font-size: 13px;
+}
+[data-layout="compact"] :is(.text-\[12px\], .text-\[12\.5px\], .text-\[13px\]) {
+  font-size: 14px;
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-sheet {
+  animation: sheet-in 140ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet {
+    animation: none;
+  }
 }

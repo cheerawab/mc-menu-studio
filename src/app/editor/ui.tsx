@@ -5,6 +5,7 @@ import {
   forwardRef, useState, type ButtonHTMLAttributes, type ReactNode, type TextareaHTMLAttributes,
 } from 'react';
 import { isHexColor, parseColor, toHex } from '@/core/render/color';
+import { useLayout } from './layoutTier';
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(' ');
@@ -19,6 +20,8 @@ export const Button = forwardRef<HTMLButtonElement, BtnProps>(function Button(
   { variant = 'default', size = 'md', className, ...rest },
   ref,
 ) {
+  // compact tier (phones): every text button becomes a 44 px touch target
+  const compact = useLayout().tier === 'compact';
   return (
     <button
       ref={ref}
@@ -26,7 +29,7 @@ export const Button = forwardRef<HTMLButtonElement, BtnProps>(function Button(
       className={cx(
         'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium transition-colors',
         'disabled:pointer-events-none disabled:opacity-40',
-        size === 'sm' ? 'h-7 px-2.5 text-[12px]' : 'h-8 px-3 text-[13px]',
+        compact ? 'h-11 px-3.5 text-[14px]' : size === 'sm' ? 'h-7 px-2.5 text-[12px]' : 'h-8 px-3 text-[13px]',
         variant === 'default' && 'border border-ink-700 bg-ink-800 text-fg hover:border-ink-600 hover:bg-ink-750',
         variant === 'primary' && 'bg-accent text-accent-ink hover:bg-accent-strong',
         variant === 'ghost' && 'text-fg-muted hover:bg-ink-750 hover:text-fg',
@@ -38,10 +41,15 @@ export const Button = forwardRef<HTMLButtonElement, BtnProps>(function Button(
   );
 });
 
-type IconBtnProps = ButtonHTMLAttributes<HTMLButtonElement> & { label: string; active?: boolean; size?: 'xs' | 'sm' | 'md' };
+type IconBtnProps = ButtonHTMLAttributes<HTMLButtonElement> & { label: string; active?: boolean; size?: 'xs' | 'sm' | 'md' | 'lg' };
+
+const ICON_SIZE = { xs: 'h-5 w-5', sm: 'h-6 w-6', md: 'h-7 w-7', lg: 'h-11 w-11' } as const;
+// compact tier: secondary icon buttons grow to 32 / 40 px; 'lg' (44 px) is for primary touch controls
+const ICON_SIZE_COMPACT = { xs: 'h-8 w-8', sm: 'h-10 w-10', md: 'h-10 w-10', lg: 'h-11 w-11' } as const;
 
 /** Icon-only button; `label` becomes the tooltip and the accessible name. */
 export function IconButton({ label, active, size = 'md', className, children, ...rest }: IconBtnProps) {
+  const compact = useLayout().tier === 'compact';
   return (
     <button
       type="button"
@@ -51,7 +59,7 @@ export function IconButton({ label, active, size = 'md', className, children, ..
       className={cx(
         'inline-flex shrink-0 items-center justify-center rounded-md transition-colors',
         'disabled:pointer-events-none disabled:opacity-30',
-        size === 'xs' ? 'h-5 w-5' : size === 'sm' ? 'h-6 w-6' : 'h-7 w-7',
+        (compact ? ICON_SIZE_COMPACT : ICON_SIZE)[size],
         active ? 'bg-ink-700 text-fg' : 'text-fg-muted hover:bg-ink-750 hover:text-fg',
         className,
       )}
@@ -66,11 +74,14 @@ export function Segmented<T extends string | number>({
   value, options, onChange, label, size = 'md',
 }: {
   value: T;
-  options: { value: T; label: ReactNode; title?: string }[];
+  /** `ariaLabel` names an option whose label is only an icon. */
+  options: { value: T; label: ReactNode; title?: string; ariaLabel?: string }[];
   onChange: (v: T) => void;
   label: string;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
 }) {
+  const compact = useLayout().tier === 'compact';
+  const big = size === 'lg' || compact;
   return (
     <div role="radiogroup" aria-label={label} className="inline-flex rounded-md border border-ink-700 bg-ink-850 p-0.5">
       {options.map((o) => (
@@ -79,11 +90,12 @@ export function Segmented<T extends string | number>({
           type="button"
           role="radio"
           aria-checked={o.value === value}
-          title={o.title}
+          aria-label={o.ariaLabel}
+          title={o.title ?? o.ariaLabel}
           onClick={() => onChange(o.value)}
           className={cx(
             'inline-flex items-center justify-center gap-1 rounded-[5px] font-medium transition-colors',
-            size === 'sm' ? 'h-6 min-w-6 px-1.5 text-[11.5px]' : 'h-7 min-w-7 px-2.5 text-[12px]',
+            big ? 'h-10 min-w-11 px-3 text-[14px]' : size === 'sm' ? 'h-6 min-w-6 px-1.5 text-[11.5px]' : 'h-7 min-w-7 px-2.5 text-[12px]',
             o.value === value ? 'bg-ink-700 text-fg shadow-sm' : 'text-fg-muted hover:text-fg',
           )}
         >
@@ -175,7 +187,9 @@ export function NumberInput({
     <div className="relative">
       <input
         type="number"
-        inputMode="decimal"
+        // on-screen keyboard: digits (+ decimal point) for non-negative fields; the default number keyboard, which
+        // has a minus key on iOS, for fields that accept negative values
+        inputMode={min !== undefined && min >= 0 ? (step < 1 ? 'decimal' : 'numeric') : undefined}
         aria-label={ariaLabel}
         disabled={disabled}
         className={cx(inputBase, 'font-mono text-[12px] tabular-nums', suffix && 'pr-7')}

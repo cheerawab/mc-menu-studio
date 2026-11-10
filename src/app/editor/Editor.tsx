@@ -1,16 +1,20 @@
 'use client';
 
 import { useEffect } from 'react';
+import { mobile } from '../state/mobile';
 import { installAppStore } from '../state/persistence';
-import { editor, useEditor } from '../state/store';
+import { editor, getEditorStore, useEditor } from '../state/store';
 import CanvasView from './CanvasView';
+import CompactBody from './CompactShell';
 import ExportDialog from './ExportDialog';
 import { ConfirmDialog, Toasts } from './Overlays';
 import GamePreview from './GamePreview';
+import { LayoutContext, useLayoutInfo, type LayoutTier } from './layoutTier';
 import LeftPanel from './LeftPanel';
 import RightPanel from './RightPanel';
 import TemplatesDialog from './TemplatesDialog';
 import TopBar from './TopBar';
+import { SelectionBar } from './TouchControls';
 
 installAppStore();
 
@@ -26,6 +30,10 @@ function useShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const s = editor();
       if (s.confirm || s.dialog) return;
+      if (e.key === 'Escape' && mobile().sheet) {
+        mobile().openSheet(null);
+        return;
+      }
       const mod = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
       if (mod && k === 'z') {
@@ -116,23 +124,48 @@ function useShortcuts() {
   }, []);
 }
 
+/** Touch-layout housekeeping: sheets only exist in compact, 多選 ends with the selection, Enter / double tap opens 屬性. */
+function useTouchSync(tier: LayoutTier) {
+  useEffect(() => {
+    if (tier !== 'compact') mobile().openSheet(null);
+  }, [tier]);
+  useEffect(
+    () =>
+      getEditorStore().subscribe((s, prev) => {
+        if (!s.selection.length && prev.selection.length && mobile().multiSelect) mobile().setMultiSelect(false);
+        if (tier === 'compact' && s.focusTextNonce !== prev.focusTextNonce) mobile().openSheet('inspect');
+      }),
+    [tier],
+  );
+}
+
 export default function Editor() {
+  const layout = useLayoutInfo();
   const mode = useEditor((s) => s.view.mode);
   useShortcuts();
+  useTouchSync(layout.tier);
   return (
-    <div className="flex h-screen min-w-[1280px] flex-col overflow-hidden bg-ink-950 text-fg">
-      <TopBar />
-      <div className="flex min-h-0 flex-1">
-        <LeftPanel />
-        <main className="relative min-w-0 flex-1 border-x border-line" aria-label={mode === 'edit' ? '編輯畫布' : '遊戲內預覽'}>
-          {mode === 'edit' ? <CanvasView /> : <GamePreview />}
-        </main>
-        <RightPanel />
+    <LayoutContext.Provider value={layout}>
+      {/* data-layout is a stable hook for tests: compact (< 900 px) | medium (900-1279 px) | desktop (>= 1280 px) */}
+      <div data-layout={layout.tier} className="app-shell flex flex-col overflow-hidden bg-ink-950 text-fg">
+        <TopBar />
+        {layout.tier === 'compact' ? (
+          <CompactBody />
+        ) : (
+          <div className="flex min-h-0 flex-1">
+            <LeftPanel />
+            <main className="relative min-w-0 flex-1 border-x border-line" aria-label={mode === 'edit' ? '編輯畫布' : '遊戲內預覽'}>
+              {mode === 'edit' ? <CanvasView /> : <GamePreview />}
+              {layout.touchUi && mode === 'edit' && <SelectionBar />}
+            </main>
+            <RightPanel />
+          </div>
+        )}
+        <TemplatesDialog />
+        <ExportDialog />
+        <ConfirmDialog />
+        <Toasts />
       </div>
-      <TemplatesDialog />
-      <ExportDialog />
-      <ConfirmDialog />
-      <Toasts />
-    </div>
+    </LayoutContext.Provider>
   );
 }
