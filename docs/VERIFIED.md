@@ -166,3 +166,29 @@ Screenshots: `exports/screenshots/7-sao-items-ingame.png`, `8-sao-status-ingame.
   (health bar, party list, mob cursors) and cannot replace the pause menu (a dialog can only add a button to it via the
   `#minecraft:pause_screen_additions` tag, minecraft.wiki Game_Menu). Picture position is fixed (centred), static pictures only in this
   exporter. See `docs/LANDSCAPE.md` for what other tools claim (motion, HD, typing in a drawn box): NOT verified by Hermes.
+
+## 16. HOW BIG CAN A PAGE BE? (Hermes, 26.3; one real-game run + decompiled layout code)
+VERIFIED in the real game (window 1280x720 pt = 2560x1440 framebuffer, GUI scale 3 = GUI 853x480):
+- `scripts/size-poc.ts` set `s480`: the SAO-style pages baked at 597x336 (k = 1.6 of the 340x210 design) = 70.0% x 70.0% of the GUI.
+  Both pages render cleanly (no seams, no wrapped rows, anti-aliased CJK text, translucent panel, no scrollbar); picture top stays at 67.
+  Vertical offsets up to 320 px work (earlier verified only to 288: `MAX_VERIFIED_OFFSET` in constants.ts can move to 320).
+  A hover tooltip ("麵包 ×12") showed up from the parked cursor, so hover on a tile region works at this size too.
+  Cost: 416 tiles (229 unique) for 2 pages, resourcepack.zip 113 KB, datapack.zip 4.1 KB (functions mode), 100 text components.
+  Screenshots: `exports/screenshots/9-sao-70pct-items.png`, `10-sao-70pct-status.png`.
+DECOMPILED (not run for S < 480; details and formulas in the minecraft-jar-inspection skill, references/dialog-layout.md):
+- Header 33 + footer 33. Body = ScrollableLayout, max height S - 66, reserves 20 px of width. Content sits at y = min(63, S - 33 - h): it
+  moves up before it scrolls, and scrolls only when taller than S - 66. plain_message widget height = 9 * lines + 8; a trailing "\n" adds an
+  empty line (StringSplitter.splitLines), so the exporter's `ceil(H/9)` newlines reserve ONE LINE (9 px) more than the picture needs.
+- No-scroll max picture height (current exporter): H <= 9 * floor((S - 83) / 9): S=270 (1080p, GUI "auto" = 4): 180 = 67%;
+  S=240 (1440p auto = 6): 153 = 64%; S=256 (1366x768 auto = 3): 171; S=360: 270 = 75%; S=480: 396 = 82%. With one newline fewer: +9 px
+  (S=270 -> 189 = exactly 70%). NOT TESTED.
+- Auto GUI scale = Window.calculateScale: largest s with fbW/s >= 320 and fbH/s >= 240 (+1 if odd with forceUnicodeFont).
+- Width is never fitted to the screen: a page wider than about (GUI width - 32) is expected to be cropped on both sides. NOT TESTED.
+- `src/core/game/chrome.ts` `widgetSpace` (= S - 100) is 34 px more pessimistic than the code above and ignores "moves up before it scrolls";
+  the editor therefore warns "高度不足" earlier than the game scrolls. Fix it after the in-game check below.
+NOT TESTED / BLOCKED: a launch with window 960x540 + `guiScale:0` (= 1080p auto, GUI 480x270) to see the scroll threshold, the scrollbar,
+the container moving up and a too-wide page. The script was blocked by the approval flow (no answer within 5 minutes) and was not retried.
+Material is ready: `exports/size-poc/s270` (fit180 336x180, over189 336x189, sao_items 340x210, wide520 520x100). To run it: set
+`MinecraftWinWidth=960`, `MinecraftWinHeight=540` in the Prism instance.cfg and `guiScale:0` in options.txt, install the s270 packs, run the
+autotest + `shot_loop.py`, restore both files. Expected if the code reading is right: fit180 has its top frame line at about y = 44 (not 67),
+over189 and sao_items show a scrollbar with the footer button still visible, wide520 is cropped at both sides.

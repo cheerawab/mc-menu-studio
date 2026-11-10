@@ -163,3 +163,8 @@ All exporter numbers are in `src/core/export/constants.ts`; mock metrics in `GAM
   `time query minecraft:day` (ticks inside the 24000-tick day timeline; `time set day` = marker `minecraft:day` = tick 1000).
   `time set day|noon|night|midnight` themselves parse in 26.3 (markers). Lesson: parse every generated command with the target
   game version; unparsable lines make the whole function (and for `trigger_tick` every button) fail.
+
+## Page size vs. screen (Hermes, see docs/VERIFIED.md section 16)
+- 597x336 (70% x 70% of a 853x480 GUI) verified in game. For smaller GUIs (1080p "auto" = 480x270) the usable height is about
+  `9 * floor((S - 83) / 9)` (180 at S = 270) per the decompiled layout code; not yet run. The editor's mock (`gameLayout.widgetSpace = S - 100`)
+  is more pessimistic than that and should be re-calibrated after the in-game check. The exporter reserves one empty line (9 px) too many.
