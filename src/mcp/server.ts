@@ -4,6 +4,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { getPage } from '../core/model/ops';
+import type { Project } from '../core/model/types';
 import type { RenderEnv } from '../core/render/types';
 import { checkProjectHandler } from './handlers/check';
 import {
@@ -30,8 +31,8 @@ const zMoveSchema = z.enum(['up', 'down', 'top', 'bottom']);
 const axisSchema = z.enum(['h', 'v']);
 const guiScaleSchema = renderScaleSchema;
 
-function requirePageOf(store: ProjectStore, handle: string, pageId: string) {
-  const page = getPage(store.get(handle), pageId);
+function requirePageIn(project: Project, pageId: string) {
+  const page = getPage(project, pageId);
   if (!page) throw new Error(pageNotFoundMessage(pageId));
   return page;
 }
@@ -188,7 +189,7 @@ export function createServer(store: ProjectStore = new ProjectStore(), env: Rend
     },
     async ({ handle, pageId, scale, inline, outPath }) => {
       const project = store.get(handle);
-      const page = requirePageOf(store, handle, pageId);
+      const page = requirePageIn(project, pageId);
       const out = renderPagePreview(project, page, env, scale);
       if (inline) return imageResult(toBase64(out.png), 'image/png', { width: out.width, height: out.height });
       const path = writePng(outPath ?? defaultPreviewPath(store.path(handle), page.key, '.png'), out.png);
@@ -205,7 +206,7 @@ export function createServer(store: ProjectStore = new ProjectStore(), env: Rend
     },
     async ({ handle, pageId, winW, winH, guiScale, inline, outPath }) => {
       const project = store.get(handle);
-      const page = requirePageOf(store, handle, pageId);
+      const page = requirePageIn(project, pageId);
       const win = { id: 'custom', label: `${winW}x${winH}`, w: winW, h: winH };
       const out = renderGameMockPreview(project, page, env, win, guiScale);
       const meta = { width: out.width, height: out.height, fits: out.fits, fitsWidth: out.fitsWidth, fitsHeight: out.fitsHeight, warning: out.warning };

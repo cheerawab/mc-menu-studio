@@ -1,5 +1,6 @@
 // Group A (project lifecycle): thin wrappers over model/defaults.createProject, templates/index.ts and
 // model/serialize.ts. The MCP-specific bit is only the file path bookkeeping (ProjectStore).
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createProject } from '../../core/model/defaults';
 import type { Project, SkinId } from '../../core/model/types';
@@ -48,7 +49,10 @@ export function defaultProjectPath(project: Project): string {
 
 export function createProjectHandle(store: ProjectStore, args: CreateProjectArgs): { handle: string; path: string; project: Project } {
   const project = buildProject(args);
-  const path = args.path ?? defaultProjectPath(project);
+  const path = resolve(args.path ?? defaultProjectPath(project));
+  // create() is for NEW projects; silently overwriting an existing file (e.g. two creates with the same default
+  // namespace and no explicit path) would lose whatever was already there. Re-opening is what mcms.project.open is for.
+  if (existsSync(path)) throw new Error(`檔案「${path}」已經存在，請用 mcms.project.open 開啟它，或指定不同的 path。`);
   const created = store.create(project, path);
   return { ...created, project };
 }

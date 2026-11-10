@@ -53,4 +53,13 @@ describe('mcms.project.create / open / save / get', () => {
     const newPath = tmpPath('renamed.mcms.json');
     expect(saveProjectHandle(store, created.handle, newPath)).toEqual({ path: newPath });
   });
+
+  it('refuses to create over an existing file (would otherwise silently clobber it)', () => {
+    const store = new ProjectStore();
+    const path = tmpPath();
+    createProjectHandle(store, { path });
+    expect(() => createProjectHandle(store, { path })).toThrow(/已經存在/);
+    // the original file is untouched
+    expect(openProjectHandle(store, path).project.name).toBe('未命名選單');
+  });
 });
