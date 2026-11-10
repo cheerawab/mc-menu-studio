@@ -1,10 +1,11 @@
-// Integer geometry helpers: snapping, moving, resizing, alignment, distribution, hit testing.
+// Integer geometry helpers: snapping, moving, resizing, alignment, distribution, hit testing; canvas zoom range and fit.
 import { clamp } from './model/defaults';
 import type { Element, Rect } from './model/types';
 
 export type SnapStep = 1 | 2 | 4 | 8;
 export const SNAP_STEPS: readonly SnapStep[] = [1, 2, 4, 8];
-export const MIN_ZOOM = 1;
+/** Canvas zoom range: 25 % (a page wider than a phone can be seen whole) to 800 %. */
+export const MIN_ZOOM = 0.25;
 export const MAX_ZOOM = 8;
 
 export function snapValue(v: number, step: number): number {
@@ -157,13 +158,20 @@ export function distributeRects(rects: readonly Rect[], axis: 'h' | 'v'): { x: n
   return out;
 }
 
-/** Largest integer zoom (1..8) that shows a w x h page inside the viewport with a margin. */
-export function fitZoom(viewW: number, viewH: number, w: number, h: number, margin = 48): number {
+/**
+ * Zoom that shows a w x h page inside a viewW x viewH stage: the largest whole zoom (1..MAX_ZOOM) that leaves `margin`
+ * around the page; a page that does not fit that way at 100 % stays at 100 % if it fits with `minMargin`, otherwise it
+ * gets the exact fractional zoom (>= MIN_ZOOM) that leaves `minMargin`. An empty stage gives 1.
+ */
+export function fitZoom(viewW: number, viewH: number, w: number, h: number, margin = 48, minMargin = 24): number {
+  if (!(viewW > 0 && viewH > 0 && w > 0 && h > 0)) return 1;
   const z = Math.floor(Math.min((viewW - margin * 2) / w, (viewH - margin * 2) / h));
-  return clamp(z, MIN_ZOOM, MAX_ZOOM);
+  if (z >= 1) return Math.min(z, MAX_ZOOM);
+  const tight = Math.min((viewW - minMargin * 2) / w, (viewH - minMargin * 2) / h);
+  return tight >= 1 ? 1 : clamp(tight, MIN_ZOOM, 1);
 }
 
-/** Pan so that the page point under the cursor stays put when zooming from z0 to z1. */
+/** Pan so that the page point under the stage point (cx, cy) stays put when zooming from z0 to z1 (not rounded). */
 export function zoomAround(panX: number, panY: number, cx: number, cy: number, z0: number, z1: number) {
-  return { panX: Math.round(cx - ((cx - panX) * z1) / z0), panY: Math.round(cy - ((cy - panY) * z1) / z0) };
+  return { panX: cx - ((cx - panX) * z1) / z0 + 0, panY: cy - ((cy - panY) * z1) / z0 + 0 };
 }

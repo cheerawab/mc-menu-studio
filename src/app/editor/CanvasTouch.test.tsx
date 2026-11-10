@@ -111,15 +111,15 @@ describe('touch on the canvas', () => {
     expect(editor().history.past.length).toBe(past);
   });
 
-  it('pinch zooms in whole steps around the finger midpoint', async () => {
+  it('pinch zoom follows the fingers around their midpoint', async () => {
     await mount();
     touch('pointerDown', 1, 100, 400);
     touch('pointerDown', 2, 200, 400);
     touch('pointerMove', 2, 300, 400);
     // page point (150, 400) under the start midpoint is now under the new midpoint (200, 400)
     expect(editor().view).toMatchObject({ zoom: 2, panX: -100, panY: -400 });
-    touch('pointerMove', 2, 220, 400); // fingers back to 120 px apart: 1.2x -> zoom 1
-    expect(editor().view.zoom).toBe(1);
+    touch('pointerMove', 2, 220, 400); // fingers back to 120 px apart: 1.2x
+    expect(editor().view.zoom).toBeCloseTo(1.2, 12);
     touch('pointerUp', 1, 100, 400);
     touch('pointerUp', 2, 220, 400);
     expect(editor().selection).toEqual([]);

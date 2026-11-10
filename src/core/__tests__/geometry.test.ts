@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  alignRects, bbox, clipRect, distributeRects, fitZoom, hitTest, rectPatchFor, resizeRect, snapMoveDelta, snapValue, zoomAround,
+  alignRects, bbox, clipRect, distributeRects, fitZoom, hitTest, MAX_ZOOM, MIN_ZOOM, rectPatchFor, resizeRect, snapMoveDelta, snapValue,
+  zoomAround,
 } from '../geometry';
 import { createElement } from '../model/defaults';
 import { emptyHistory, record, redo, undo } from '../history';
@@ -55,8 +56,17 @@ describe('alignment and distribution', () => {
     expect(hitTest([a, { ...b, hidden: true }], 15, 15)?.id).toBe(a.id);
     expect(hitTest([a, { ...b, locked: true }], 15, 15)?.id).toBe(a.id);
     expect(fitZoom(1000, 800, 320, 200)).toBe(2);
-    expect(fitZoom(100, 100, 900, 600)).toBe(1);
     expect(zoomAround(0, 0, 100, 100, 2, 4)).toEqual({ panX: -100, panY: -100 });
+    expect(zoomAround(0.5, 0, 101, 0, 2, 3)).toEqual({ panX: -49.75, panY: 0 }); // not rounded
+  });
+  it('fits a page: whole zooms when they fit, 100 % with a small margin, else the exact fraction', () => {
+    expect(fitZoom(872, 790, 340, 210)).toBe(2); // desktop stage, "lobby"
+    expect(fitZoom(4000, 4000, 100, 100)).toBe(MAX_ZOOM);
+    expect(fitZoom(370, 710, 340, 210, 48, 12)).toBe(1); // phone: no whole zoom with 48 px, but 100 % with 12 px
+    expect(fitZoom(370, 710, 480, 270, 48, 12)).toBeCloseTo((370 - 24) / 480, 12); // 72 %: wider than the phone
+    expect(fitZoom(824, 260, 480, 270, 48, 12)).toBeCloseTo((260 - 24) / 270, 12); // landscape: height decides
+    expect(fitZoom(100, 100, 900, 600)).toBe(MIN_ZOOM);
+    expect(fitZoom(0, 0, 340, 210)).toBe(1); // nothing to fit into
   });
 });
 

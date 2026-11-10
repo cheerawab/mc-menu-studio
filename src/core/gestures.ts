@@ -1,8 +1,10 @@
 // Pure touch-gesture math for the editor canvas (no DOM): tap / double-tap detection, pinch zoom + two-finger pan,
 // the resize handles that stay usable for a finger, and keeping the selection visible when the stage is resized.
+// The pan stays a float while zooming; panBy (one-finger pan) and keepInView (stage resize) work at rest and round.
 // Points are CSS pixels relative to the stage element.
 import { HANDLES, MAX_ZOOM, MIN_ZOOM, type Handle } from './geometry';
 import type { Rect } from './model/types';
+import { rubberBand } from './viewAnimation';
 
 export interface Pt {
   x: number;
@@ -53,23 +55,27 @@ export interface PinchStart extends ViewXform {
   b: Pt;
 }
 
-/** Whole-number zoom after a pinch from finger distance d0 to d1 (the editor keeps pixels square). */
-export function pinchZoom(z0: number, d0: number, d1: number, min = MIN_ZOOM, max = MAX_ZOOM): number {
+/**
+ * Zoom after a pinch from finger distance d0 to d1: follows the fingers (fractional, not rounded). Past min / max it
+ * stops there, or with `overshoot` > 0 stretches a little further with resistance (see rubberBand).
+ */
+export function pinchZoom(z0: number, d0: number, d1: number, min = MIN_ZOOM, max = MAX_ZOOM, overshoot = 0): number {
   const scale = d0 > 0 ? d1 / d0 : 1;
-  return Math.min(max, Math.max(min, Math.round(z0 * scale)));
+  return rubberBand(z0 * scale, min, max, overshoot);
 }
 
 /**
  * View for a two-finger gesture: zoom by the change of the finger distance and pan so that the page point that was
- * under the starting midpoint stays under the current midpoint (pinch and two-finger pan in one formula).
+ * under the starting midpoint stays under the current midpoint (pinch and two-finger pan in one formula). The pan is
+ * not rounded while the fingers are down; the settle on release rounds it at whole zooms.
  */
-export function pinchView(start: PinchStart, a: Pt, b: Pt, min = MIN_ZOOM, max = MAX_ZOOM): ViewXform {
-  const zoom = pinchZoom(start.zoom, distance(start.a, start.b), distance(a, b), min, max);
+export function pinchView(start: PinchStart, a: Pt, b: Pt, min = MIN_ZOOM, max = MAX_ZOOM, overshoot = 0): ViewXform {
+  const zoom = pinchZoom(start.zoom, distance(start.a, start.b), distance(a, b), min, max, overshoot);
   const m0 = midpoint(start.a, start.b);
   const m1 = midpoint(a, b);
   const px = (m0.x - start.panX) / start.zoom;
   const py = (m0.y - start.panY) / start.zoom;
-  return { zoom, panX: round(m1.x - px * zoom), panY: round(m1.y - py * zoom) };
+  return { zoom, panX: m1.x - px * zoom + 0, panY: m1.y - py * zoom + 0 };
 }
 
 /** Pan after a one-finger drag from `from` to `to`. */

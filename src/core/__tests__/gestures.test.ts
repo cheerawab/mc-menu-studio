@@ -22,13 +22,35 @@ describe('tap and double tap', () => {
 });
 
 describe('pinch', () => {
-  it('zooms in whole steps and clamps', () => {
-    expect(pinchZoom(2, 100, 200)).toBe(4);
-    expect(pinchZoom(2, 100, 120)).toBe(2); // 2.4 rounds back to 2
-    expect(pinchZoom(2, 100, 130)).toBe(3);
+  it('follows the fingers continuously and clamps', () => {
+    expect(pinchZoom(2, 80, 120)).toBe(3);
+    expect(pinchZoom(2, 80, 100)).toBe(2.5);
+    expect(pinchZoom(2, 100, 120)).toBeCloseTo(2.4, 12); // no rounding any more
     expect(pinchZoom(4, 100, 1000)).toBe(MAX_ZOOM);
-    expect(pinchZoom(2, 100, 10)).toBe(MIN_ZOOM);
+    expect(pinchZoom(2, 100, 1)).toBe(MIN_ZOOM);
     expect(pinchZoom(3, 0, 50)).toBe(3);
+  });
+
+  it('stretches at most 10 % past the limits with overshoot on', () => {
+    const over = pinchZoom(4, 100, 1000, MIN_ZOOM, MAX_ZOOM, 0.1); // raw 40
+    expect(over).toBeGreaterThan(MAX_ZOOM);
+    expect(over).toBeLessThan(MAX_ZOOM * 1.1);
+    const under = pinchZoom(1, 100, 1, MIN_ZOOM, MAX_ZOOM, 0.1); // raw 0.01
+    expect(under).toBeLessThan(MIN_ZOOM);
+    expect(under).toBeGreaterThan(MIN_ZOOM / 1.1);
+    expect(pinchZoom(2, 100, 150, MIN_ZOOM, MAX_ZOOM, 0.1)).toBe(3); // inside the range: unchanged
+  });
+
+  it('keeps the page point under the finger midpoint at fractional zooms', () => {
+    const start = { a: { x: 37, y: 210 }, b: { x: 117, y: 250 }, zoom: 1.7, panX: -12.5, panY: 33 };
+    const a = { x: 20, y: 180 }, b = { x: 171, y: 291 };
+    const v = pinchView(start, a, b);
+    expect(v.zoom).toBeCloseTo((1.7 * Math.hypot(151, 111)) / Math.hypot(80, 40), 12);
+    expect(Number.isInteger(v.panX)).toBe(false); // the pan stays a float while the fingers are down
+    const m0 = { x: 77, y: 230 }, m1 = { x: 95.5, y: 235.5 };
+    const page = { x: (m0.x - start.panX) / start.zoom, y: (m0.y - start.panY) / start.zoom };
+    expect(v.panX + page.x * v.zoom).toBeCloseTo(m1.x, 9);
+    expect(v.panY + page.y * v.zoom).toBeCloseTo(m1.y, 9);
   });
 
   it('keeps the page point under the fingers and pans with two fingers', () => {
