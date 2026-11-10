@@ -110,6 +110,15 @@ export function gameLayout(winW: number, winH: number, scale: number, pageW: num
   };
 }
 
+/**
+ * Backing-canvas pixels per GUI px of the preview: the page's render scale, but never more than the GUI scale. The game
+ * samples the glyph textures nearest at screen pixels (GUI scale per GUI px), so a render scale above the GUI scale
+ * drops texels; drawing the page bitmap nearest into a canvas of this density drops exactly the same ones.
+ */
+export function previewDensity(renderScale: number, guiScale: number): number {
+  return Math.max(1, Math.min(renderScale, guiScale));
+}
+
 /** zh-TW fit warning for the checks, or null when the page fits the window at that GUI scale. */
 export function fitProblem(win: WindowPreset, guiScale: number, page: { width: number; height: number }): string | null {
   const L = gameLayout(win.w, win.h, guiScale, page.width, page.height);
@@ -162,7 +171,10 @@ export interface MockOptions {
   fontFamily: string;
 }
 
-/** Draws the whole dialog screen in GUI pixels into a guiW x guiH context. */
+/**
+ * Draws the whole dialog screen in GUI pixels into a guiW x guiH context (or a larger canvas whose transform maps GUI
+ * px to its pixels). The page bitmap may have any number of texels per GUI px: it is drawn nearest at its GUI size.
+ */
 export function drawGameMock(ctx: Ctx2D, env: RenderEnv, L: GameLayout, o: MockOptions): void {
   const C = GAME_CHROME;
   ctx.save();
@@ -176,7 +188,7 @@ export function drawGameMock(ctx: Ctx2D, env: RenderEnv, L: GameLayout, o: MockO
     ctx.rect(L.body.x, L.body.y, L.body.w, L.body.h);
     ctx.clip();
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(o.page, L.page.x, L.page.y);
+    ctx.drawImage(o.page, L.page.x, L.page.y, L.page.w, L.page.h);
     ctx.restore();
   }
   if (!L.fitsHeight && L.body.h > 8) {

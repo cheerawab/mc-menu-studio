@@ -14,6 +14,7 @@ import { renderEnv, whenImagesReady } from '../state/images';
 import { editor, useEditor } from '../state/store';
 import { useLayout } from './layoutTier';
 import { Modal } from './Overlays';
+import RenderScalePicker from './RenderScalePicker';
 import { Button, cx, Field, Section, Segmented, Select, TextInput, Toggle } from './ui';
 
 interface Prefs {
@@ -239,6 +240,11 @@ function ExportBody() {
                 <TextInput ariaLabel="匯出命名空間" mono value={ns} onChange={(v) => editor().commit((p) => ({ ...p, namespace: v.toLowerCase().replace(/[^a-z0-9_]/g, '_') }), { key: 'namespace' })} />
               </Field>
             </div>
+            <div className="mt-2.5">
+              <Field label="解析度（文字清晰度）">
+                <RenderScalePicker size={compact ? 'lg' : 'md'} />
+              </Field>
+            </div>
           </Section>
           <Section title="匯出模式">
             <div role="radiogroup" aria-label="匯出模式" className="flex flex-col gap-2">
@@ -333,6 +339,10 @@ function ExportBody() {
             {ready && (
               <div>
                 <Stat label="頁面" value={ready.build.stats.pages} />
+                <Stat
+                  label="解析度（圖塊、字型格）"
+                  value={`${ready.build.stats.scale}x・${ready.build.stats.tileSize} px・${ready.build.stats.cellTexels}×${ready.build.stats.cellTexels}`}
+                />
                 <Stat label={`圖塊（${ready.build.stats.tileSize} px，重複的只存一次）`} value={`${ready.build.stats.tilesPlaced} → ${ready.build.stats.tilesUnique}`} />
                 <Stat label="字型圖集 PNG／自訂字元" value={`${ready.build.stats.sheets}／${ready.build.stats.glyphs}`} />
                 <Stat label="點擊區域（隱形字元）" value={`${ready.build.stats.regions}（${ready.build.stats.hitGlyphs}）`} />

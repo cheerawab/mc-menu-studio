@@ -138,4 +138,9 @@ it('uses nearest-neighbour scaling only while the page is magnified on the devic
   expect(crispAt(0.72, 3)).toBe(true); // 2.16 device px per page px on a 3x phone screen
   expect(crispAt(0.5, 2)).toBe(true);
   expect(crispAt(0.25, 2)).toBe(false);
+  // with a render scale: crisp once a texel covers at least one device pixel (zoom x dpr >= scale)
+  expect([crispAt(1, 1, 2), crispAt(1, 2, 2), crispAt(2, 1, 2), crispAt(1.5, 2, 3), crispAt(0.72, 3, 2), crispAt(0.72, 3, 3)]).toEqual([
+    false, true, true, true, true, false,
+  ]);
+  expect(crispAt(1, 1, 1)).toBe(crispAt(1));
 });

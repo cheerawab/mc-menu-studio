@@ -2,13 +2,14 @@
 
 import { CircleCheck, CircleX, RotateCcw } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { autoGuiScale, drawGameMock, drawWorld, gameLayout, WINDOW_PRESETS, type GuiScale } from '@/core/game/chrome';
+import { autoGuiScale, drawGameMock, drawWorld, gameLayout, previewDensity, WINDOW_PRESETS, type GuiScale } from '@/core/game/chrome';
 import { effectiveFooterLabel } from '@/core/model/defaults';
 import { containsPoint } from '@/core/geometry';
 import { isTap, LONG_PRESS_MS } from '@/core/gestures';
 import { cleanCommand } from '@/core/model/validate';
 import type { Region } from '@/core/model/types';
 import { computeRegions, renderPageToCanvas } from '@/core/render/renderPage';
+import { fitScale } from '@/core/render/scale';
 import type { Ctx2D } from '@/core/render/types';
 import { renderEnv, useImagesVersion } from '../state/images';
 import { currentPage, editor, useEditor } from '../state/store';
@@ -31,6 +32,9 @@ export default function GamePreview() {
   const win = WINDOW_PRESETS.find((w) => w.id === windowId) ?? WINDOW_PRESETS[1];
   const L = useMemo(() => gameLayout(win.w, win.h, guiScale, page.width, page.height), [win.w, win.h, guiScale, page.width, page.height]);
   const regions = useMemo(() => computeRegions(page), [page]);
+  // the page at the project's 解析度; the backing canvas at that density but at most the GUI scale (what the game shows)
+  const renderScale = fitScale(page.width, page.height, project.settings.renderScale);
+  const density = previewDensity(renderScale, guiScale);
   const imagesVersion = useImagesVersion(project.assets);
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -63,18 +67,20 @@ export default function GamePreview() {
 
   useEffect(() => {
     const c = canvasRef.current;
-    const ctx = c?.getContext('2d') as unknown as Ctx2D | null;
-    if (!c || !ctx) return;
-    c.width = L.guiW;
-    c.height = L.guiH;
+    const dom = c?.getContext('2d');
+    if (!c || !dom) return;
+    c.width = L.guiW * density;
+    c.height = L.guiH * density;
+    dom.setTransform(density, 0, 0, density, 0, 0); // everything below draws in GUI px
+    const ctx = dom as unknown as Ctx2D;
     const env = renderEnv(project.assets);
     if (closed) {
       drawWorld(ctx, L.guiW, L.guiH);
       return;
     }
-    const { canvas } = renderPageToCanvas(page, project, env, { placeholders: false });
+    const { canvas } = renderPageToCanvas(page, project, env, { placeholders: false, scale: renderScale });
     drawGameMock(ctx, env, L, { title: page.title, page: canvas, fontFamily: project.settings.fontFamily, footerLabel: effectiveFooterLabel(page, project) });
-  }, [L, page, project, closed, imagesVersion]);
+  }, [L, page, project, closed, imagesVersion, renderScale, density]);
 
   const pad = compact ? 8 : 24;
   const k = Math.min((host.w - pad * 2) / win.w, (host.h - pad * 2) / win.h);
@@ -177,6 +183,9 @@ export default function GamePreview() {
     <>
       <span className="text-fg-muted">
         {win.w}×{win.h}・GUI {guiScale} → 介面 {L.guiW}×{L.guiH}
+      </span>
+      <span className={renderScale > guiScale ? 'text-warn' : 'text-fg-dim'} title="專案的解析度（屬性 → 專案，或匯出視窗）">
+        解析度 {renderScale}x{renderScale > guiScale ? `（高於 GUI ${guiScale}，遊戲會略過部分像素）` : ''}
       </span>
       <span className="text-fg-dim">
         內容區約 {bodyAvail} px 高，此頁需要 {L.widget.h} px

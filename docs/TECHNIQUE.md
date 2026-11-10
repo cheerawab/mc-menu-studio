@@ -130,3 +130,21 @@ Merge consecutive glyphs of the same font/colour/events into one run to keep the
 Hermes copies `resourcepack.zip` to the Minecraft 26.3 instance `resourcepacks/` and `datapack` into a test world's
 `datapacks/`, opens the dialog (G key or `/dialog show`), takes screenshots and clicks buttons. Findings are written back
 here under "VERIFIED" and into your next prompt. Expect corrections to the [GW]/[TEST] items above.
+
+## 9. Resolution (render scale, Stage H)
+
+Status: **[DECOMPILED]** by Hermes from the 26.3 client (`BitmapProvider`, `FontTexture`, `GlyphStitcher`,
+`BakedSheetGlyph`, `GlyphBitmap`); **NOT yet run in the game for scale > 1** (scale 1 is the VERIFIED layout above).
+The exporter keeps every layout number in GUI px and only gives the glyph bitmaps more texels (`ExportOptions.scale`,
+project setting 解析度, default 2x; code: `src/core/export/constants.ts`, `tiles.ts`, `sheets.ts`).
+1. Bitmap provider: cell texels = image width / columns, image height / rows; `pixelScale = (float) height / cellHeight`
+   with `height` = the JSON field. The quad is `texels * pixelScale` GUI px, so a cell of `T * scale` texels with
+   `"height": T` is drawn T GUI px tall: same layout, scale^2 more texels. `ascent` keeps its GUI meaning.
+2. Advance = `(int) (0.5 + actualGlyphWidth * pixelScale) + 1` (float product, double add, truncation;
+   `bitmapAdvance()` in constants.ts). At scale 1 this is the VERIFIED `actualWidth + 1`.
+3. Glyphs are stitched into 256x256 atlas pages with 1 texel spacing, sampled NEAREST; a cell > 255 texels cannot be
+   stitched (missing-glyph box). Tile size per scale 1/2/3/4: 32/32/24/16 GUI px (cells 32/64/72/64 texels).
+4. Nearest sampling: screen px per texel = GUI scale / render scale. Whole numbers are crisp (GUI 2 -> 2x, GUI 3 -> 3x,
+   GUI 4 -> 4x or 2x); a render scale above the GUI scale drops texels (aliasing). Hence the default 2x.
+5. Hit glyphs (alpha 1/255 cells) are not pictures and stay 1x (`height` = cell height).
+Message width, lines, y offsets, hit boxes and the wrap rule do not change with the scale.

@@ -123,7 +123,9 @@ export function approachZoom(cur: number, target: number, dt: number, tau = WHEE
 }
 
 /**
- * Nearest-neighbour scaling while the page bitmap is magnified on the device (zoom x devicePixelRatio >= 1, e.g. 50 %
- * on a 2x screen is still 1 device px per page px); the browser's smooth scaling when it really shrinks.
+ * Nearest-neighbour scaling while every texel of the page bitmap covers at least one device pixel: zoom x
+ * devicePixelRatio >= scale, where `scale` = texels per page px (the project's 解析度). E.g. 1x at 50 % on a 2x screen,
+ * 2x at 100 % on a 2x screen or at 200 % on a 1x screen. Below that the bitmap really shrinks on the device and the
+ * browser's smooth scaling looks better (a 2x page at 100 % on a 1x screen shows anti-aliased text, not dropped texels).
  */
-export const crispAt = (zoom: number, dpr = 1) => zoom * dpr >= 1 - 1e-9;
+export const crispAt = (zoom: number, dpr = 1, scale = 1) => (zoom * dpr) / scale >= 1 - 1e-9;

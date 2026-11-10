@@ -14,6 +14,7 @@ import { createElement } from '@/core/model/defaults';
 import { addElements, updateElements } from '@/core/model/ops';
 import type { ElementType, Id, Rect } from '@/core/model/types';
 import { computeRegions, renderPage } from '@/core/render/renderPage';
+import { fitScale } from '@/core/render/scale';
 import type { Ctx2D } from '@/core/render/types';
 import {
   clampZoom, crispAt, FIT_MS, ladderStep, PINCH_OVERSHOOT, restView, STEP_MS, wheelZoomFactor, ZOOM_EPS, zoomViewAround,
@@ -203,6 +204,8 @@ export default function CanvasView() {
   const compact = tier === 'compact';
   const page = useEditor(currentPage);
   const project = useEditor((s) => s.project);
+  // the page bitmap is rendered at the project's 解析度 (lowered for display only when the canvas would be too big)
+  const scale = fitScale(page.width, page.height, project.settings.renderScale);
   const selection = useEditor((s) => s.selection);
   const view = useEditor((s) => s.view);
   const imagesVersion = useImagesVersion(project.assets);
@@ -287,12 +290,12 @@ export default function CanvasView() {
     const ctx = c.getContext('2d');
     if (!ctx) return;
     const raf = requestAnimationFrame(() => {
-      if (c.width !== page.width) c.width = page.width;
-      if (c.height !== page.height) c.height = page.height;
-      renderPage(ctx as unknown as Ctx2D, page, project, renderEnv(project.assets));
+      if (c.width !== page.width * scale) c.width = page.width * scale;
+      if (c.height !== page.height * scale) c.height = page.height * scale;
+      renderPage(ctx as unknown as Ctx2D, page, project, renderEnv(project.assets), { scale });
     });
     return () => cancelAnimationFrame(raf);
-  }, [page, project, imagesVersion]);
+  }, [page, project, imagesVersion, scale]);
 
   const selectedEls = page.elements.filter((e) => selection.includes(e.id));
   const selBox = bbox(selectedEls);
@@ -650,8 +653,8 @@ export default function CanvasView() {
   const gridStep = view.snap > 1 ? view.snap : 8;
   const showGrid = view.showGrid && gridStep * zoom >= 6;
   const regions = useMemo(() => (view.showRegions ? computeRegions(page) : []), [view.showRegions, page]);
-  // nearest-neighbour while page pixels are magnified on the device, the browser's smooth scaling when they shrink
-  const crisp = crispAt(zoom, window.devicePixelRatio || 1);
+  // nearest-neighbour while texels are magnified on the device, the browser's smooth scaling when they shrink
+  const crisp = crispAt(zoom, window.devicePixelRatio || 1, scale);
   const single = selectedEls.length === 1 ? selectedEls[0] : null;
   const hoverEl = hoverId && !selection.includes(hoverId) ? page.elements.find((x) => x.id === hoverId) : undefined;
   const cursorStyle = panning ? 'grabbing' : spaceDown ? 'grab' : hoverEl || (hoverId && selection.includes(hoverId)) ? 'move' : 'default';
@@ -705,8 +708,8 @@ export default function CanvasView() {
             <div className="checker absolute inset-0 shadow-[0_0_0_1px_#2c313b,0_12px_40px_rgba(0,0,0,0.45)]" />
             <canvas
               ref={canvasRef}
-              width={page.width}
-              height={page.height}
+              width={page.width * scale}
+              height={page.height * scale}
               className={cx('absolute inset-0', crisp && 'pixelated')}
               style={{ width: W, height: H }}
               role="img"

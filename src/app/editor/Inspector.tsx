@@ -14,6 +14,7 @@ import { currentPage, editor, useEditor } from '../state/store';
 import { ELEMENT_ICON } from './elementMeta';
 import { iconDataUrl } from './iconImages';
 import { useLayout } from './layoutTier';
+import RenderScalePicker from './RenderScalePicker';
 import { Button, ColorInput, cx, Field, IconButton, NumberInput, Section, Segmented, Select, TextArea, TextInput, Toggle } from './ui';
 
 type Patch = Partial<Element>;
@@ -595,6 +596,9 @@ function PageInspector({ page }: { page: Page }) {
               <TextInput ariaLabel="預設字型" value={project.settings.fontFamily} onChange={(v) => setProject((p) => ({ ...p, settings: { ...p.settings, fontFamily: v } }), 'font')} />
               <Button size="sm" variant="ghost" title="還原預設字型" onClick={() => setProject((p) => ({ ...p, settings: { ...p.settings, fontFamily: DEFAULT_FONT_STACK } }), 'font-reset')}>還原</Button>
             </div>
+          </Field>
+          <Field label="解析度（文字清晰度）">
+            <RenderScalePicker />
           </Field>
           <div className="flex items-center justify-between rounded-md border border-ink-700 bg-ink-850 px-2.5 py-2 text-[11.5px]">
             <span className="text-fg-muted">圖片素材 {nAssets} 個・約 {(bytes / 1024).toFixed(0)} KB</span>

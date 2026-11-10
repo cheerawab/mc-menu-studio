@@ -1,4 +1,122 @@
-# STATUS — Stage G (smooth zoom) — done
+# STATUS — Stage H (export resolution 1x-4x) — done; 2x-4x not run in the game yet
+
+## Stage H: what changed
+
+Owner: 「文字模糊」 (text on the editor canvas). Hermes proposed rendering the pictures at a higher resolution, the
+owner chose it. A project setting 解析度 (`ProjectSettings.renderScale`, 1-4, default 2) gives every exported picture
+scale x scale texels per GUI px; the layout (message width, lines, offsets, hit boxes, wrap rule) stays in GUI px.
+Commits: e9348f8 (renderer), 91339f2 (export pipeline, model, CLI, goldens), plus the editor/docs commit.
+
+- Renderer (`src/core/render/`): `RenderOptions.scale` (default 1). `renderPage` multiplies the transform by it (inside
+  its save/restore), `renderPageToCanvas` allocates page px x scale. Shapes, skins, icons = exact scale x scale blocks
+  (test: 2x-4x equal the nearest upscale of 1x); images keep their smoothing flag at the higher resolution.
+- Text (`text.ts`): `layoutText` = wrap, alignment, vertical align, line height in page px from the 1x font metrics
+  (identical line breaks at every scale); glyphs rasterised at font size x scale; shadow offset = scale texels
+  (1 page px); bitmap copied with `drawImage(bmp, x, y, W, H)`, smoothing off (texels 1:1); cache key includes the
+  raster scale; cache has a 6,000,000-texel budget besides the 300 entries.
+- Pixelate: `on` = rasterise at 1x, threshold, scaled up nearest (same retro look at every scale); `auto` (<= 13 px)
+  only at scale 1; `off` anti-aliased at scale. Buttons and bars use the `auto` rule.
+- `render/scale.ts`: `RENDER_SCALES`, `isRenderScale`, `MAX_CANVAS_PIXELS` = 16,000,000, `fitScale` (display fallback).
+- Exporter: `ExportOptions.scale` (default 1, so old callers and the PoC scripts are unchanged); `ExportPage.width/height`
+  (page px, optional: else image / scale) and a check that every image is page px x scale. `TileSet(T, scale)` cuts
+  T x scale texel cells, actual width in texels; `bitmapAdvance(aw, height, cellHeight)` in constants.ts implements the
+  decompiled advance with float math (doc comment quotes the source); tiles use `glyphAdvance(aw, scale)`. Sheets:
+  cells of T x scale texels, font JSON `height` = T, `ascent` = 7 - N as before; hit glyph sheets stay 1x.
+  `T = tileSize ?? 32/32/24/16` for 1x/2x/3x/4x; `T x scale > 255` is an ExportError. Stats: `scale`, `cellTexels`.
+- `exportPagesFromProject` renders at `project.settings.renderScale` (or an explicit scale); `checkExport` adds the
+  error `export-canvas-size` above 16,000,000 texels per page (hint: lower the resolution). Calibration page at the
+  export's scale = nearest upscale of the 1x picture.
+- Model: `renderScale` in `ProjectSettings`, `DEFAULT_RENDER_SCALE` = 2; load (localStorage), import (JSON) and
+  templates go through `normalizeProject`: missing or invalid values become 2.
+- Editor: `RenderScalePicker` (segmented 1x 像素風 / 2x 建議 / 3x / 4x 最清楚, tooltips 1x：像素風、檔案最小 etc., hint
+  for the selected option + 「遊戲介面大小 ÷ 解析度」是整數時最清楚) in the export dialog (基本設定) and in
+  屬性 → 專案 after 預設字型; one undo step per change. Export dialog stats row 「解析度（圖塊、字型格）」, e.g.
+  `2x・32 px・64×64`, next to the pack sizes. Canvas: bitmap at the project scale (fitScale cap), CSS rule
+  `crispAt(zoom, dpr, scale)` = nearest when zoom x dpr >= scale. Game preview: page at the project scale, backing
+  canvas GUI px x `previewDensity` = min(scale, GUI scale), page drawn nearest at its GUI size, mock chrome through the
+  same transform; info line 「解析度 Nx」, in amber 「（高於 GUI n，遊戲會略過部分像素）」 when the scale exceeds the GUI scale.
+- README_zh-TW.txt (every export): 【文字清晰度（解析度）】 = resolution used, tile/cell size, GUI rule, jagged edges above
+  the GUI scale, measured demo sizes. HANDOFF.md: resolution line + a "Resolution" section with in-game checks.
+- CLI: `npm run demo:export -- --scale N` (1-4; default the templates' 解析度 = 2x). `exports/demo` regenerated at 2x.
+- PNG encoder: the five filter sums in one pass (same heuristic and tie-break, byte-identical output).
+- `vitest.config.mts`: `testTimeout` 60 s (the demo-page tests already timed out at 5 s on this busy machine before
+  Stage H; they now also run at 2x-4x). ExportDialog tests wait up to 20 s for a build; the two mode tests pin the
+  lobby template to 1x (their pre-Stage-H cost), the new 解析度 test uses a one-page project.
+
+### Stage H decisions (nobody could be asked)
+
+- Default 2x: every texel is a whole number of screen px at GUI 2 and 4 (the usual auto scales), 1.5 px at GUI 3 (no
+  texel dropped), only GUI 1 drops texels. Old projects load as 2x too, so their next export becomes 2x (bigger).
+- Tile table 32 / 32 / 24 / 16 GUI px (cells 32 / 64 / 72 / 64 texels) as the brief suggested; `tileSize` stays an option.
+- Preview density = min(scale, GUI scale) instead of the brief's "scale x GUI px": the game samples the glyph textures
+  at screen px, so drawing the page nearest into a canvas of GUI-scale density drops exactly the texels the game drops
+  (same nearest rule); it also keeps the preview canvas <= the window size (2560x1440 at most), so it needs no cap.
+- Alignment (centre / right) uses 1x metrics like the line breaks, so at 2x+ a line can sit up to about one texel off
+  its ideal hi-res position (identical layout at every scale was the priority).
+- The README paragraph is in every export, also at 1x; at 1x the README therefore differs from d39d556 by that
+  paragraph, while resourcepack.zip, datapack.zip and autotest.zip of both modes are byte-identical (cmp against a
+  copy of the d39d556 export taken before any change). Text-free page hashes from d39d556 are pinned in a test.
+- The brief's example "3x, T 24: 71 texels -> 24" contradicts fact 2: (int)(0.5 + 71 x 0.33333334) + 1 = 24 + 1 = 25.
+  The tests follow fact 2: 72 -> 25, 71 -> 25, 70 -> 24 (and two float cases outside the 1/scale ratios, where float
+  math gives a different result than exact or double math: (11, 13, 22) -> 7, (11, 15, 22) -> 9).
+- Measured growth is not scale^2: the 2x pack is 5x the 1x pack (small text becomes anti-aliased instead of
+  pixelated, which compresses worse), 3x 7.5x, 4x 10x (flat areas compress well). Docs and README give measured numbers.
+- The 16,000,000-texel guard cannot trigger for pages the editor allows (1000x600 at 4x = 9.6 Mpx); it covers
+  hand-edited files. The export refuses (error), canvas and preview fall back to a lower scale for display only.
+
+### Stage H measured (demo export, 9 pages, `npm run demo:export -- --autotest --scale N`)
+
+| scale | tile / cell | tiles placed (unique) | glyphs | fonts (max y) | components | resourcepack.zip | datapack.zip reg / fn |
+|-------|-------------|-----------------------|--------|---------------|------------|------------------|-----------------------|
+| 1x | 32 / 32 | 604 (458) | 471 | 26 (192) | 205 | 91,093 B (89 KB) | 9,969 / 9,846 B |
+| 2x | 32 / 64 | 604 (459) | 472 | 26 (192) | 205 | 454,118 B (443 KB) | 9,973 / 9,848 B |
+| 3x | 24 / 72 | 1054 (690) | 703 | 28 (192) | 223 | 683,076 B (667 KB) | 10,731 / 10,576 B |
+| 4x | 16 / 64 | 2304 (1273) | 1286 | 33 (208) | 262 | 910,498 B (889 KB) | 12,423 / 12,292 B |
+
+CPU (this machine, heavily loaded): PNG encoding is the bulk of an export, about 0.35 s per 1024x1024 sheet (zlib
+level 9 alone 0.15 s); the "lobby" template end to end (render + build + zip) took 0.5 s at 1x and 1-4 s at 2x-4x
+under a load average of 50-150.
+
+### Stage H tests (+32, 193 total)
+
+`render-scale.test.ts` (9: canvas size and bad scales, text-free pages unchanged at 1x and exact blocks at 2x-4x, images
+and smoothing, label line breaks at 2x/3x, layoutText, pixelate rules, shadow offset, cache key, canvas guard),
+`export-scale.test.ts` (10: advance at 1x, hand values at 2x-4x, float cases, tile table, 255 limit, sheet sizes and
+font heights, scale-invariant regions / hit boxes / width / lines, image size checks, project scale + canvas guard,
+README), `export-golden.test.ts` (+6: calibration at 3x, client walk of every demo page at 1x/2x/3x/4x = decode sheets
+and font JSON, compute advances like the client, walk the line, every glyph on its tile, pixel-exact at texel
+resolution; 2x goldens in both modes), model (+1 migration), persistence (+1 old save loads at 2x), CLI args (+1),
+`CanvasTouch` (+1 canvas = page px x scale, crisp rule; the 1x test pinned to 1x), `GamePreview.test.tsx` (2: density,
+renders at 1x-4x with the page bitmap drawn at its GUI size), `ExportDialog` (+1 the control sets the setting, stats
+follow), `crispAt` cases in the existing viewAnimation test. The client simulation (`helpers/clientSim.ts`) now reads
+scaled cells (fact 1/2 re-implemented, not imported) and refuses cells > 255 texels.
+
+### Stage H: what Hermes should verify
+
+In the game (nothing above 1x has run there):
+1. `exports/demo` (2x): calibration grid exact across tile seams, no missing-glyph boxes, corner hit boxes unchanged;
+   `lobby` text crisp at GUI 2 and 4, slightly uneven at GUI 3 (1.5 px per texel).
+2. `npm run demo:export -- --autotest --scale 3 --out exports/demo-3x` (24 px tiles of 72 texels, pixelScale = float
+   1/3: the most likely place for an off-by-one) and `--scale 4 --out exports/demo-4x` (16 px tiles): seams, offsets up
+   to 208, clicks and tooltips. 4x at GUI 2/3 should look jagged (texels dropped), as predicted.
+3. Compare `--scale 1` and `--scale 2` screenshots of `lobby` at the same GUI scale.
+In the browser:
+4. Export dialog: 解析度 control and hint, stats row, sizes; 屬性 → 專案 has the same control; the canvas re-renders;
+   on a 1x screen 2x looks smooth at 100 % and pixel-exact from 200 %, on a Retina screen crisp at 100 %.
+5. Game preview with 4x at GUI 1-3: texel dropping like the game, amber info text; a real phone with 4x on a large
+   page (9.6 Mpx canvas) for memory and export time.
+
+### Stage H: left rough
+
+- `docs/images/export.jpg` predates the 解析度 control (no browser here to retake it).
+- Exports still run on the main thread; a 4x export of a big project can block the dialog for a few seconds.
+- Template thumbnails (範本 dialog) still render at 1x.
+- `npm test` is slower (about 20 s at a load average of ~60, 87-112 s at ~110-125 here; Stage G was ~5 s) because the client
+  walk renders every template at four scales.
+- The PoC scripts compile; `sao-poc` was run with a temporary output dir and reproduced its packs byte for byte; the
+  others were not run (they write into `exports/size-poc`, which must not be touched).
+
+# Stage G (smooth zoom) — done
 
 ## Stage G: what changed
 
@@ -327,15 +445,19 @@ npm install
 npm run dev            # editor at http://localhost:3737 (匯出 button opens the Export dialog)
 npm run lint           # eslint
 npm run typecheck      # tsc --noEmit, strict
-npm test               # vitest: 161 tests, ~5 s
+npm test               # vitest: 193 tests (~20 s; longer on a busy machine)
 npm run build          # production build
-npm run demo:export -- --mode both --autotest                    # trigger mode (default) -> exports/demo/ + HANDOFF.md
+npm run demo:export -- --mode both --autotest                    # trigger mode (default), 2x -> exports/demo/ + HANDOFF.md
+npm run demo:export -- --autotest --scale 1 --out exports/demo-1x   # same pages at 1x (also 3, 4)
 npm run demo:export -- --mode both --autotest --commands direct --out exports/direct   # Stage B behaviour
 npm run preview:skins  # PNG previews of templates/icons/game mock -> exports/previews/
 ```
 
 Phone check (Hermes): any browser's device mode, e.g. 390x844, 844x390, 768x1024 with touch emulation, and 1024x768;
 `[data-layout]` on the editor root tells the tier.
+
+Last run (Stage H): `npm run lint`, `npm run typecheck`, `npm test` (193/193) and `npm run build` all exit 0;
+`npm run demo:export -- --autotest` regenerated `exports/demo` at 2x.
 
 Last run (Stage G): `npm run lint`, `npm run typecheck`, `npm test` (161/161) and `npm run build` all exit 0. Demo export
 not re-run (exporter, renderer and data model untouched; the golden export tests pass).

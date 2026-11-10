@@ -290,8 +290,25 @@ describe('touch on the canvas', () => {
     expect(editor().view.zoom).toBeCloseTo(1.2, 9);
   });
 
-  it('shows a whole percent and scales the page smoothly only below 100 %', async () => {
+  it('renders the page at the project 解析度 (canvas = page px x scale) and is crisp only from zoom x dpr >= scale', async () => {
     await mount();
+    const canvas = pageCanvas();
+    expect([canvas.width, canvas.height]).toEqual([340 * 2, 210 * 2]); // template default 2x
+    expect(parseFloat(canvas.style.width)).toBe(340); // CSS size stays page px x zoom
+    expect(canvas.className).not.toContain('pixelated'); // zoom 1 on a 1x screen: 2 texels per device px
+    act(() => editor().setView({ zoom: 2 }));
+    expect(pageCanvas().className).toContain('pixelated');
+    act(() => editor().commit((p) => ({ ...p, settings: { ...p.settings, renderScale: 4 } })));
+    expect([pageCanvas().width, pageCanvas().height]).toEqual([340 * 4, 210 * 4]);
+    expect(pageCanvas().className).not.toContain('pixelated');
+    act(() => editor().setView({ zoom: 4 }));
+    expect(pageCanvas().className).toContain('pixelated');
+  });
+
+  it('shows a whole percent and scales the page smoothly only below 100 % (1x)', async () => {
+    await mount();
+    act(() => editor().commit((p) => ({ ...p, settings: { ...p.settings, renderScale: 1 } })));
+    expect(pageCanvas().width).toBe(340);
     expect(pageCanvas().className).toContain('pixelated');
     act(() => editor().setView({ zoom: 0.47 })); // 0.47 * 100 = 47.00000000000001
     expect(zoomReadout()).toBe('47%');

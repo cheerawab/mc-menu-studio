@@ -7,7 +7,7 @@ renders pixel-positioned, clickable menus inside the vanilla Dialog screen. See 
 ## Commands (keep these working)
 - `npm run dev`        dev server on **port 3737** (`next dev -p 3737`)
 - `npm run build`, `npm run lint`, `npm run typecheck`, `npm test` (vitest)
-- `npm run demo:export -- [--mode registry|functions|both] [--commands trigger|direct] [--out exports/demo] [--autotest]` writes
+- `npm run demo:export -- [--mode registry|functions|both] [--commands trigger|direct] [--scale 1|2|3|4] [--out exports/demo] [--autotest]` writes
   `exports/demo/<mode>/{resourcepack.zip,datapack.zip,README_zh-TW.txt[,autotest.zip]}` + `exports/demo/HANDOFF.md` headlessly (Node)
 
 ## Layout
