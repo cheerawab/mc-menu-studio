@@ -1,7 +1,7 @@
 // Zod schemas for the MCP tool inputs. Mirrors src/core/model/types.ts; never redefines core validation rules
 // (ranges/clamps still happen in model/defaults.ts normalizeElement, this only rejects the wrong shape/type).
 import { z } from 'zod';
-import { ELEMENT_TYPES, SKIN_IDS } from '../core/model/defaults';
+import { ELEMENT_TYPES, PAGE_LIMITS, SKIN_IDS } from '../core/model/defaults';
 import { ICON_IDS } from '../core/model/types';
 import type { ElementType, SkinId } from '../core/model/types';
 
@@ -16,6 +16,13 @@ export const elementTypeSchema = z.enum(ELEMENT_TYPES as unknown as [ElementType
 export const iconIdSchema = z.enum(ICON_IDS);
 export const skinIdSchema = z.enum(SKIN_IDS as unknown as [SkinId, ...SkinId[]]);
 export const renderScaleSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
+
+/**
+ * mcms.preview.game_mock allocates a canvas no larger than winW x winH texels (density <= guiScale, see
+ * game/chrome.ts previewDensity), so bounding the window dimensions bounds that allocation. 3840x2160 (4K) is well
+ * above every WINDOW_PRESETS entry (max 2560x1440) but keeps a pathological request from asking for a giant canvas.
+ */
+export const windowDimSchema = z.number().int().min(64).max(3840);
 
 export const actionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('none') }),
@@ -83,11 +90,14 @@ export const elementPatchShape = {
 /** Partial, unknown-key-rejecting patch/creation-props object for any element type. */
 export const elementPropsSchema = z.object(elementPatchShape).partial().strict();
 
+// width/height are bounded to PAGE_LIMITS: ops.ts itself does not clamp them (by design, callers do - the editor's
+// NumberInput already clamps to this same range before calling updatePage), and an unbounded page size would later
+// drive an unbounded canvas allocation in mcms.preview.*/mcms.export.* (createCanvas(width * scale, ...)).
 export const pagePatchShape = {
   key: z.string(),
   title: z.string(),
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
+  width: z.number().int().min(PAGE_LIMITS.minW).max(PAGE_LIMITS.maxW),
+  height: z.number().int().min(PAGE_LIMITS.minH).max(PAGE_LIMITS.maxH),
   bgColor: z.string().nullable(),
   footerLabel: z.string().nullable(),
 };

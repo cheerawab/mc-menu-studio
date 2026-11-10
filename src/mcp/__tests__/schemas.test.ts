@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import {
   actionSchema, checkOptionsShape, elementPropsSchema, elementTypeSchema, exportOptionsShape, handleSchema, idsSchema,
-  idSchema, iconIdSchema, pagePropsSchema, renderScaleSchema, skinIdSchema,
+  idSchema, iconIdSchema, pagePropsSchema, renderScaleSchema, skinIdSchema, windowDimSchema,
 } from '../schemas';
 
 describe('handleSchema / idSchema / idsSchema', () => {
@@ -77,11 +77,30 @@ describe('pagePropsSchema', () => {
     expect(pagePropsSchema.safeParse({ width: 0 }).success).toBe(false);
     expect(pagePropsSchema.safeParse({ width: 12.5 }).success).toBe(false);
   });
-  it('accepts a legitimate partial page patch', () => {
+  it('rejects sizes outside PAGE_LIMITS (would otherwise drive an unbounded canvas allocation)', () => {
+    expect(pagePropsSchema.safeParse({ width: 1001 }).success).toBe(false); // PAGE_LIMITS.maxW = 1000
+    expect(pagePropsSchema.safeParse({ height: 601 }).success).toBe(false); // PAGE_LIMITS.maxH = 600
+    expect(pagePropsSchema.safeParse({ width: 15 }).success).toBe(false); // PAGE_LIMITS.minW = 16
+    expect(pagePropsSchema.safeParse({ width: 99999 }).success).toBe(false);
+  });
+  it('accepts a legitimate partial page patch, including the limits themselves', () => {
     expect(pagePropsSchema.safeParse({ key: 'main', title: '選單', width: 320, height: 200, bgColor: null, footerLabel: '關閉' }).success).toBe(
       true,
     );
+    expect(pagePropsSchema.safeParse({ width: 1000, height: 600 }).success).toBe(true);
     expect(pagePropsSchema.safeParse({}).success).toBe(true);
+  });
+});
+
+describe('windowDimSchema', () => {
+  it('rejects non-positive, non-integer and pathologically large dimensions', () => {
+    expect(windowDimSchema.safeParse(0).success).toBe(false);
+    expect(windowDimSchema.safeParse(10).success).toBe(false); // below the 64 floor
+    expect(windowDimSchema.safeParse(100.5).success).toBe(false);
+    expect(windowDimSchema.safeParse(1_000_000).success).toBe(false);
+  });
+  it('accepts common window sizes', () => {
+    for (const d of [1280, 1920, 2560, 3840]) expect(windowDimSchema.safeParse(d).success).toBe(true);
   });
 });
 

@@ -36,6 +36,12 @@ describe('ProjectStore (file is the source of truth)', () => {
     expect(store.get(handle)).toBe(next);
   });
 
+  it('open() throws a zh-TW error for a missing file, not a raw ENOENT', () => {
+    const store = new ProjectStore();
+    const missing = tmpPath('does-not-exist.mcms.json');
+    expect(() => store.open(missing)).toThrow(/找不到專案檔/);
+  });
+
   it('open() reads a file written by create() into a fresh handle', () => {
     const store = new ProjectStore();
     const path = tmpPath();

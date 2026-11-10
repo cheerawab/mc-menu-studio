@@ -24,9 +24,16 @@ export function writeProjectFile(path: string, project: Project): void {
   writeFileSync(path, serializeProject(project), 'utf8');
 }
 
-/** Reads and normalises a project JSON file. Throws the core's zh-TW error on garbage input. */
+/** Reads and normalises a project JSON file. Throws a zh-TW error on a missing file or the core's on garbage input. */
 export function readProjectFile(path: string): { project: Project; warnings: string[] } {
-  return parseProjectJson(readFileSync(path, 'utf8'));
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(`找不到專案檔「${path}」。`);
+    throw e;
+  }
+  return parseProjectJson(text);
 }
 
 /**

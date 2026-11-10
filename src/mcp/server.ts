@@ -21,7 +21,7 @@ import { createProjectHandle, getProjectHandle, listTemplates, openProjectHandle
 import { imageResult, jsonResult } from './result';
 import {
   checkOptionsShape, elementPropsSchema, elementTypeSchema, exportOptionsShape, handleSchema, idSchema, idsSchema,
-  pagePropsSchema, renderScaleSchema, skinIdSchema,
+  pagePropsSchema, renderScaleSchema, skinIdSchema, windowDimSchema,
 } from './schemas';
 import { ProjectStore } from './state';
 
@@ -200,7 +200,7 @@ export function createServer(store: ProjectStore = new ProjectStore(), env: Rend
     'mcms.preview.game_mock',
     '把一頁渲染成遊戲 Dialog 畫面的模擬截圖（含是否放得下的判定）。預設寫檔回路徑；inline=true 時改回傳 base64 圖片。',
     {
-      handle: handleSchema, pageId: idSchema, winW: z.number().int().positive(), winH: z.number().int().positive(),
+      handle: handleSchema, pageId: idSchema, winW: windowDimSchema, winH: windowDimSchema,
       guiScale: guiScaleSchema, inline: z.boolean().optional(), outPath: z.string().optional(),
     },
     async ({ handle, pageId, winW, winH, guiScale, inline, outPath }) => {
