@@ -54,10 +54,11 @@ const LEGACY_HEX: Record<string, string> = {
   c: '#ff5555', d: '#ff55ff', e: '#ffff55', f: '#ffffff',
 };
 
-/** Strips legacy & codes (and MiniMessage tags) from a string for display text. */
+/** Strips legacy & codes, MiniMessage tags, and inline #rrggbb/&#rrggbb hex colour codes from a string. */
 export function stripFormatting(s: string): string {
   return s
     .replace(/<[^>]+>/g, '') // MiniMessage tags
+    .replace(/&?#[0-9a-f]{6}/gi, '') // inline hex colour (zMenu: #18f54c or &#18f54c)
     .replace(/&[0-9a-fk-or]/gi, '') // legacy & codes
     .replace(/[§][0-9a-fk-or]/gi, '')
     .trim();

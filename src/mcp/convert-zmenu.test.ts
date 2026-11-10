@@ -12,6 +12,10 @@ describe('zMenu text helpers', () => {
     expect(stripFormatting('&6&l傳送系統')).toBe('傳送系統');
     expect(stripFormatting('<gradient:red:blue>外部連結</gradient>')).toBe('外部連結');
   });
+  it('strips inline #rrggbb hex colour codes (zMenu style)', () => {
+    expect(stripFormatting('#18f54c下一頁')).toBe('下一頁');
+    expect(stripFormatting('&#cf1717關閉')).toBe('關閉');
+  });
   it('reads the first legacy colour as hex', () => {
     expect(firstColor('&6黃色')).toBe('#ffaa00');
     expect(firstColor('無色')).toBeNull();

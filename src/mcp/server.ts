@@ -18,6 +18,7 @@ import {
   addPageHandler, duplicatePageHandler, movePageHandler, pageNotFoundMessage, removePageHandler, updatePageHandler,
 } from './handlers/page';
 import { defaultPreviewPath, renderGameMockPreview, renderPagePreview, toBase64, writePng } from './handlers/preview';
+import { detectPlaceholders, placeholderExportWarning, samplePlaceholders } from './papi';
 import { createProjectHandle, getProjectHandle, listTemplates, openProjectHandle, saveProjectHandle } from './handlers/project';
 import { imageResult, jsonResult } from './result';
 import {
@@ -182,13 +183,14 @@ export function createServer(store: ProjectStore = new ProjectStore(), env: Rend
   // F. previews -------------------------------------------------------------------------------------------------
   server.tool(
     'mcms.preview.page',
-    '把一頁渲染成 PNG（和編輯器畫面一致）。預設寫檔回路徑；inline=true 時改回傳 base64 圖片。',
+    '把一頁渲染成 PNG（和編輯器畫面一致）。預設寫檔回路徑；inline=true 時改回傳 base64 圖片。sample=true 時把 PAPI 佔位符（%player_name% 等）替換成樣本值再渲染，方便看實際長相。',
     {
       handle: handleSchema, pageId: idSchema, scale: renderScaleSchema.optional(), inline: z.boolean().optional(),
-      outPath: z.string().optional(),
+      outPath: z.string().optional(), sample: z.boolean().optional(),
     },
-    async ({ handle, pageId, scale, inline, outPath }) => {
-      const project = store.get(handle);
+    async ({ handle, pageId, scale, inline, outPath, sample }) => {
+      const stored = store.get(handle);
+      const project = sample ? samplePlaceholders(stored) : stored;
       const page = requirePageIn(project, pageId);
       const out = renderPagePreview(project, page, env, scale);
       if (inline) return imageResult(toBase64(out.png), 'image/png', { width: out.width, height: out.height });
@@ -203,9 +205,10 @@ export function createServer(store: ProjectStore = new ProjectStore(), env: Rend
     {
       handle: handleSchema, pageId: idSchema, winW: windowDimSchema, winH: windowDimSchema,
       guiScale: guiScaleSchema, inline: z.boolean().optional(), outPath: z.string().optional(),
+      sample: z.boolean().optional(),
     },
-    async ({ handle, pageId, winW, winH, guiScale, inline, outPath }) => {
-      const project = store.get(handle);
+    async ({ handle, pageId, winW, winH, guiScale, inline, outPath, sample }) => {
+      const project = sample ? samplePlaceholders(store.get(handle)) : store.get(handle);
       const page = requirePageIn(project, pageId);
       const win = { id: 'custom', label: `${winW}x${winH}`, w: winW, h: winH };
       const out = renderGameMockPreview(project, page, env, win, guiScale);
@@ -222,8 +225,10 @@ export function createServer(store: ProjectStore = new ProjectStore(), env: Rend
     '在記憶體裡建置匯出結果（不寫檔），回傳統計數字與警告，讓 agent 先檢查再決定是否真的匯出。',
     { handle: handleSchema, options: z.object(exportOptionsShape).partial().optional() },
     async ({ handle, options }) => {
-      const build = buildProjectExport(store.get(handle), env, options ?? {});
-      return jsonResult({ stats: build.stats, warnings: build.warnings });
+      const project = store.get(handle);
+      const build = buildProjectExport(project, env, options ?? {});
+      const papi = placeholderExportWarning(project);
+      return jsonResult({ stats: build.stats, warnings: [...(papi ? [papi] : []), ...build.warnings] });
     },
   );
 
@@ -232,9 +237,27 @@ export function createServer(store: ProjectStore = new ProjectStore(), env: Rend
     '匯出 resourcepack.zip / datapack.zip / README_zh-TW.txt（+ 可選 autotest.zip）到指定資料夾。',
     { handle: handleSchema, options: z.object(exportOptionsShape).partial().optional(), outDir: z.string().min(1) },
     async ({ handle, options, outDir }) => {
-      const build = buildProjectExport(store.get(handle), env, options ?? {});
+      const project = store.get(handle);
+      const build = buildProjectExport(project, env, options ?? {});
       const files = await writeProjectExport(build, outDir);
-      return jsonResult({ files, stats: build.stats, warnings: build.warnings });
+      const papi = placeholderExportWarning(project);
+      return jsonResult({ files, stats: build.stats, warnings: [...(papi ? [papi] : []), ...build.warnings] });
+    },
+  );
+
+  // H. PAPI (PlaceholderAPI) ------------------------------------------------------------------------------------
+  server.tool(
+    'mcms.papi.scan',
+    '掃描專案裡所有 PAPI 佔位符（%player_name% 等）並回報位置。原版 Dialog 匯出不會在執行期替換它們，預覽可用 sample=true 看樣本值長相。',
+    { handle: handleSchema },
+    async ({ handle }) => {
+      const project = store.get(handle);
+      const hits = detectPlaceholders(project);
+      return jsonResult({
+        tokens: [...new Set(hits.map((h) => `%${h.token}%`))],
+        hits,
+        warning: placeholderExportWarning(project),
+      });
     },
   );
 
